@@ -1,0 +1,15 @@
+{
+  "name": "ai-craft",
+  "version": "3.0.0",
+  "description": "A living block world where every villager has a mind: 120 autonomous villagers who remember, farm, build, trade and vote on one shared clock.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "setup": "npm --prefix server install",
+    "start": "node server/server.js",
+    "test": "node tests/smoke.test.js",
+    "simulate": "node tests/simulate.js",
+    "brand": "node tools/brand.js"
+  },
+  "engines": { "node": ">=18" }
+}

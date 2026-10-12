@@ -1,0 +1,10 @@
+{
+  "name": "ai-village-server",
+  "version": "2.0.0",
+  "description": "Authoritative shared-world server for AI CRAFT: one simulation, one clock, PostgreSQL persistence, WebSocket fan-out.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": { "start": "node server.js", "schema": "psql \"$DATABASE_URL\" -f schema.sql" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "pg": "^8.11.0", "ws": "^8.16.0" }
+}
