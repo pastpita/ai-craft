@@ -47,3 +47,16 @@ Name · role · personality traits · current need · CURRENT TASK · REASON · 
 - `S.fields`: player-visible fields created during play (cells, tilled count); rebuilt into world nodes on load.
 - New block `sprout` (id 31) with its own texture.
 - `a.task = { t, r }` on every resident; live channel `k` for followers.
+
+## Keeping the work moving
+
+Field reports from the shared world showed builders standing at storehouses for days. Four fixes:
+
+| Problem | Fix |
+|---|---|
+| Clay only comes from Rivergate's banks, so every brick, roof tile, plaster and glass block stalled | **Change of plan**: after 45 minutes without a material (at once if nobody in the village can produce it) the builder swaps the remaining blocks for ones the storehouse has: brick → stone brick, roof tile → slate or thatch, plaster → planks, glass → an open window. The swap is announced in the feed and written to the builder's mind. |
+| Owners who ran out of coins froze their own building sites | The village lends the difference (recorded as debt); if the owner is already deep in debt the treasury pays. |
+| Work plans were re-chosen every few minutes and each choice restarted the walk | A villager who picks the job they are already doing carries on with it. |
+| Finished villages had idle builders | **Growth**: twice a day a village with idle builders starts a home for a resident without one (down payment plus a village loan) or a civic building it lacks. |
+
+Wood, stone and clay gathering rates were raised so supply keeps up with construction. Storehouse carts also move clay and wool between villages.

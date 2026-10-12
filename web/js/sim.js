@@ -732,6 +732,9 @@ function decide(a) {
     if (a.goals.some(g => g.type === 'BECOME_RICH')) s += 0.25;
     if (a.goals.some(g => g.type === 'AVOID_WORK')) s -= 0.35;
     if (a.job === 'mayor' && a.p.conscientiousness < 0.3) s -= 0.3;
+    // hands-on trades: the village visibly depends on them, and they know it
+    if (AV.JOBS[a.job] && (AV.JOBS[a.job].gather || a.job === 'builder')) s += 0.75;
+    if (a.job === 'builder' && S.projects.some(p => !p.done && p.vid === a.vid)) s += 0.4;
     if (a.toolHp <= 0 && ['farmer', 'miner', 'builder', 'blacksmith'].includes(a.job)) {
       const seller = Sim.chooseSeller(a, 'tools', h);
       if (seller && a.money >= seller.price) add('buy', 2.4, { place: seller.id, item: 'tools', reason: 'tools broke', shop: seller.id });
@@ -808,6 +811,11 @@ function chooseAndGo(a, forced) {
   a.prevChoice = top.type;
   (a.stats.types = a.stats.types || {})[top.type] = ((a.stats.types[top.type]) || 0) + 1;
   if (AV.Civ && AV.Civ.onDecision) AV.Civ.onDecision(a, top, work);
+  // still on the same job at the same place: carry on instead of starting the walk over
+  const cur = a.plan;
+  if (cur && top.type === 'work' && cur.type === 'work' && !cur.target && (cur.place === top.place || (top.place && place(top.place) && place(top.place).id === cur.place))) {
+    cur.until = Math.max(cur.until || 0, top.until || 0); cur.reason = top.reason; return;
+  }
   goPlan(a, top);
   setThoughtFor(a, top, work);
   const base = a.mind ? a.mind.think : 12;

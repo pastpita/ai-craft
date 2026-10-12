@@ -235,7 +235,8 @@ UI.updateLabels = function (camera, agents, visitors, cinema) {
   const nowMs = performance.now();
   let thoughtsShown = 0, bubbles = 0, tasks = 0;
   // on the homepage, keep labels off the text panels
-  const avoid = cinema ? [...document.querySelectorAll('.hero3 .pitch, .hero3 .livecol')].map(e => e.getBoundingClientRect()) : [];
+  const avoid = cinema ? [...document.querySelectorAll('.hero4 .pitch, .hero4 .stage')].map(e => e.getBoundingClientRect()) : [];
+  const heroEl = cinema && document.querySelector('.hero4'); const heroBottom = heroEl ? heroEl.getBoundingClientRect().bottom - 40 : Infinity;
   const pid = PID();
   const known = (a) => watch || (me().known && me().known[a.id] && me().known[a.id].length) || (a.rel && a.rel[pid] && a.rel[pid][7] > 5);
   for (const [a, n, d] of cand.slice(0, 24)) {
@@ -244,6 +245,7 @@ UI.updateLabels = function (camera, agents, visitors, cinema) {
     wv.set(n.rx, n.vy + 2.05 * ((a.look && a.look.h) || 1), n.rz);
     wv.project(camera);
     if (wv.z > 1 || wv.z < -1 || Math.abs(wv.x) > 1.2 || Math.abs(wv.y) > 1.2) continue;
+    if (cinema && -wv.y * H2 + H2 > heroBottom) continue;
     if (avoid.length) { const sx = wv.x * W2 + W2, sy = -wv.y * H2 + H2; if (avoid.some(r => sx > r.left - 90 && sx < r.right + 90 && sy > r.top - 10 && sy < r.bottom + 50)) continue; }
     let el = UI.labels[a.id];
     if (!el) { el = document.createElement('div'); el.className = 'lbl'; el.innerHTML = '<div class="think" hidden></div><div class="say" hidden></div><div class="task" hidden></div><div class="nm"></div>'; $('labels').appendChild(el); UI.labels[a.id] = el; }

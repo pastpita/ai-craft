@@ -17,6 +17,7 @@ for (let i = 0; i < 1440; i++) Sim.advance(1);
 const work = S.counters.work || {};
 assert.ok((work.harvested || 0) + (work.planted || 0) > 20, 'farmers plant and harvest');
 assert.ok((work.hauls || 0) > 10, 'loads are carried to storehouses');
+assert.ok((work.blocks || 0) > 150, 'builders keep placing blocks through the day');
 assert.ok(S.agents.every(a => a.left || (a.task && a.task.t)), 'every villager has a task descriptor');
 assert.ok(S.agents.some(a => a.decisions && a.decisions[0] && a.decisions[0].why), 'decisions carry structured summaries');
 assert.ok(S.history.length >= 1, 'history is written');

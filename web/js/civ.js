@@ -18,7 +18,7 @@ const nameOf = (id, v) => Sim.nameOf(id, v);
 const Civ = AV.Civ = {};
 
 // ---------------- constants ----------------
-const RATE = { food: 3.4, wood: 3.2, stone: 2.2, iron: 1.4, coal: 1.7, gold: 0.18, clay: 2.2, wool: 1.4, fish: 2.6 };
+const RATE = { food: 3.4, wood: 4.8, stone: 3.4, iron: 1.4, coal: 1.7, gold: 0.18, clay: 3.2, wool: 1.4, fish: 2.6 };
 const SKILL_OF = { food: 'farming', fish: 'fishing', wood: 'woodcutting', stone: 'mining', iron: 'mining', coal: 'mining', gold: 'mining', clay: 'digging', wool: 'herding' };
 const STOCK_OF = { fish: 'food' };
 const JOB_SKILL = { farmer: 'farming', fisher: 'fishing', woodcutter: 'woodcutting', miner: 'mining', potter: 'digging', shepherd: 'herding', builder: 'building', baker: 'baking', blacksmith: 'smithing', merchant: 'trade', shopkeeper: 'trade', bartender: 'trade', guard: 'investigation', nightguard: 'investigation', journalist: 'writing', doctor: 'medicine', mayor: 'politics', teacher: 'teaching' };
@@ -31,6 +31,35 @@ const MAT = {};
 [B.BRICK, B.ROOF_TILE, B.PLASTER, B.GLASS].forEach(b => { MAT[b] = 'clay'; });
 [B.CLOTH, B.WOOL].forEach(b => { MAT[b] = 'wool'; });
 MAT[B.TORCH] = 'coal';
+// when a material runs out, builders change the plan instead of standing at the storehouse
+const SUB = {};
+SUB[B.BRICK] = [B.STONE_BRICK, B.COBBLE, B.PLANKS]; SUB[B.ROOF_TILE] = [B.SLATE, B.THATCH, B.PLANKS]; SUB[B.PLASTER] = [B.PLANKS, B.COBBLE]; SUB[B.GLASS] = [0];
+SUB[B.CLOTH] = [B.PLANKS]; SUB[B.WOOL] = [B.PLANKS]; SUB[B.TORCH] = [0];
+[B.COBBLE, B.STONE, B.STONE_BRICK].forEach(b => { SUB[b] = [B.PLANKS]; }); SUB[B.SLATE] = [B.THATCH, B.PLANKS];
+[B.PLANKS, B.LOG, B.FENCE, B.SHELF].forEach(b => { SUB[b] = [B.COBBLE, B.STONE_BRICK]; }); SUB[B.THATCH] = [B.SLATE, B.COBBLE];
+const MAT_WORD = { clay: 'clay', stone: 'stone', wood: 'timber', wool: 'wool', coal: 'coal' };
+function substitute(pr, mat, a) {
+  const Vv = V(pr.vid); const st = Vv.econ.stock;
+  const rem = {}; for (let k = pr.i; k < pr.blocks.length; k++) { const b = pr.blocks[k][3]; if (MAT[b] === mat) rem[b] = (rem[b] || 0) + 1; }
+  const swap = {}; let into = null;
+  for (const key in rem) {
+    let best = null, bs = -1;
+    for (const alt of SUB[key] || []) { if (alt === 0) { if (best === null) { best = 0; bs = 0; } continue; } const am = MAT[alt]; if (am === mat) continue; const have = (st[am] || 0) + (pr.site[am] || 0); if (have > bs) { bs = have; best = alt; } }
+    if (best === null || (best !== 0 && bs < Math.min(4, rem[key]))) continue;
+    swap[key] = best; if (best) into = into || MAT[best];
+  }
+  if (!Object.keys(swap).length) return 0;
+  let n = 0;
+  for (let k = pr.i; k < pr.blocks.length; k++) { const b = pr.blocks[k][3]; if (swap[b] !== undefined) { const r = pr.blocks[k]; pr.blocks[k] = [r[0], r[1], r[2], swap[b]]; n++; } }
+  pr.waiting = null; pr.waitSince = null; pr.subs = (pr.subs || 0) + 1;
+  pr.cost = Math.max(1, Math.round(pr.cost));
+  const who = a ? a.name : 'The builders of ' + Vv.name;
+  const txt = into ? who + ' changed the plan for ' + pr.label + ': ' + Vv.name + ' is out of ' + (MAT_WORD[mat] || mat) + ', so it goes up in ' + (MAT_WORD[into] || into) + ' instead.' : who + ' left the windows of ' + pr.label + ' open: ' + Vv.name + ' is out of ' + (MAT_WORD[mat] || mat) + '.';
+  if (a) { Sim.setThought(a, 'No ' + (MAT_WORD[mat] || mat) + ' anywhere. We build it in ' + (into ? MAT_WORD[into] || into : 'what we have') + '.'); Civ.mind(a, a.name + ' changed the plan of ' + pr.label + ': ' + (MAT_WORD[mat] || mat) + ' ran out, so ' + (into || 'other blocks') + ' instead', 'decision'); }
+  Sim.emit({ type: 'CONSTRUCTION_STARTED', vid: pr.vid, actor: a ? a.id : null, imp: 0.38, public: true, what: 'change of plan', x: pr.lot.x, z: pr.lot.z, text: txt });
+  return n;
+}
+Civ.substitute = substitute;
 
 // ---------------- helpers ----------------
 function V(vid) { return S().villages[vid]; }
@@ -602,12 +631,22 @@ Civ.buildTick = function (a) {
         const cost = q * Sim.priceOf(mm, a.vid);
         if (pr.escrow < cost * 0.5 && pr.owner) { const o = s.byId[pr.owner]; if (o && o.money > cost) { o.money -= cost; pr.escrow += cost; } }
         const paid = Math.min(cost, Math.max(0, pr.escrow));
-        if (paid < cost * 0.5 && pr.owner) { pr.waiting = 'funds'; continue; }
-        pr.escrow -= paid; Vv.town.treasury += paid;
+        if (paid < cost * 0.5 && pr.owner) {
+          // the owner is short: the village lends the difference and the work goes on
+          const o = s.byId[pr.owner]; const gap = cost - paid;
+          if (o && !o.left && (o.debt || 0) < pr.cost * 2.5) { o.debt = Math.round((o.debt || 0) + gap); pr.escrow += gap; } else if (Vv.town.treasury > gap + 20) { Vv.town.treasury -= gap; pr.escrow += gap; } else { pr.waiting = 'funds'; continue; }
+        }
+        const pay2 = Math.min(cost, Math.max(0, pr.escrow));
+        pr.escrow -= pay2; Vv.town.treasury += pay2;
         Vv.econ.stock[mm] -= q; a.carry[mm] = (a.carry[mm] || 0) + q; took += q; parts.push(q + ' ' + mm);
       }
+      if (!took && m && (Vv.econ.stock[m] || 0) < 1) {
+        pr.waitSince = pr.waitSince || s.t;
+        // nobody nearby makes it, or the wait is long: change the plan
+        if ((!Civ.gatherJobsFor(a.vid).includes(JOB_FOR[m]) || s.t - pr.waitSince > 45) && substitute(pr, m, a)) { b.stage = 'next'; return; }
+      }
       if (!took) { pr.waiting = m && (Vv.econ.stock[m] || 0) < 1 ? m : pr.waiting || 'materials'; Vv.econ.want = Vv.econ.want || {}; if (m) Vv.econ.want[m] = (Vv.econ.want[m] || 0) + 1; if (s.t % 60 === 0) Sim.setThought(a, pr.waiting === 'funds' ? 'The money for this job ran out.' : 'No ' + pr.waiting + ' in the storehouse. We wait.'); b.stage = 'wait'; b.t = s.t; return; }
-      pr.waiting = null;
+      pr.waiting = null; pr.waitSince = null;
       b.stage = 'carry';
       const e = Sim.place(pr.siteId).spots[0]; b.spot = e;
       walk(a, e[0], e[1]);
@@ -1137,6 +1176,7 @@ Civ.influence = function (vid) {
 Civ.hourly = function (hh) {
   const s = S();
   growCrops(1);
+  if (hh === 9 || hh === 13) for (const v of World.VILLAGES) Civ.growth(v.id);
   for (const n of World.nodes) {
     if (n.crop) continue;
     let r = n.regen / 24;
@@ -1211,7 +1251,7 @@ Civ.carts = function () {
   const s = S();
   for (const v of World.VILLAGES) {
     const Vv = V(v.id); const pop = people(v.id).length;
-    for (const g of ['food', 'wood', 'stone', 'iron', 'coal']) {
+    for (const g of ['food', 'wood', 'stone', 'iron', 'coal', 'clay', 'wool']) {
       const want = g === 'food' ? pop * 2.5 : g === 'iron' || g === 'coal' ? 10 : 20;
       if ((Vv.econ.stock[g] || 0) >= want * 0.5) continue;
       const src = World.VILLAGES.filter(o => o.id !== v.id && (V(o.id).econ.stock[g] || 0) > (g === 'food' ? people(o.id).length * 4 : g === 'iron' || g === 'coal' ? 30 : 50)).sort((x, y) => V(y.id).econ.stock[g] - V(x.id).econ.stock[g])[0];
@@ -1226,6 +1266,31 @@ Civ.carts = function () {
       Sim.emit({ type: 'TRADE', vid: v.id, to: src.id, imp: g === 'food' ? 0.55 : 0.4, public: true, text: Vv.name + ' bought ' + q + ' ' + g + ' from ' + Sv.name + ' by storehouse cart for ' + cost + ' coins.' });
     }
   }
+};
+// growth: a village with idle builders always finds something worth building
+Civ.growth = function (vid) {
+  const s = S(); const Vv = V(vid); const L = people(vid);
+  const builders = L.filter(a => a.job === 'builder').length; if (!builders) return null;
+  const open = s.projects.filter(p => !p.done && p.vid === vid);
+  if (open.length >= Math.max(1, Math.ceil(builders / 2))) return null;
+  // 1. the best-off resident without a proper home of their own
+  const homeless = L.filter(a => !a.core || true).filter(a => !ownsHome(a).some(p => p.tier && p.tier !== 'hut') && !s.projects.some(p => !p.done && p.owner === a.id) && !(a.jailUntil > s.t) && (a.debt || 0) < 150);
+  homeless.sort((x, y) => y.money - x.money);
+  for (const a of homeless.slice(0, 3)) {
+    const tier = a.money > Civ.estimate(vid, 'cottage') * 0.6 ? 'cottage' : 'hut';
+    const est = Civ.estimate(vid, tier); if (a.money < est * 0.3) continue;
+    const pay = Math.round(Math.min(a.money * 0.8, est)); const loan = Math.max(0, Math.round(est * 1.15 - pay));
+    a.money -= pay;
+    const pr = Civ.startProject(a, 'home', { tier, escrow: pay + loan, why: a.name + ' put down ' + pay + ' coins' + (loan ? ' and borrowed ' + loan + ' from the village' : '') + ' for a ' + HOME[tier].label });
+    if (!pr) { a.money += pay; continue; }
+    if (loan) { a.debt = (a.debt || 0) + loan; Vv.town.treasury -= Math.min(Vv.town.treasury, loan * 0.5); }
+    Sim.setThought(a, 'A place of my own, finally.');
+    return pr;
+  }
+  // 2. a public building the village does not have yet
+  const want = ['watchtower', 'school', 'library', 'hall'].find(c => !(Vv.civic || []).includes(c) && !s.projects.some(p => p.civic === c && p.vid === vid));
+  if (want && Vv.town.treasury > CIVIC[want].cost * 0.5) { const pay = Math.min(Vv.town.treasury - 10, CIVIC[want].cost); Vv.town.treasury -= pay; return Civ.startProject(null, 'civic', { vid, civic: want, escrow: CIVIC[want].cost, why: Vv.name + ' has builders with nothing to do and voted for a ' + CIVIC[want].label }); }
+  return null;
 };
 Civ.daily = function () {
   const s = S(); const d = dayOf(s.t);
@@ -1513,6 +1578,7 @@ Civ.macroDay = function () {
       let budget = Math.round(builders.length * 0.7 * 60 * 7 / Math.max(1, s.projects.filter(p => !p.done && p.vid === vid).length));
       while (budget-- > 0 && pr.i < pr.blocks.length) {
         const [x, y, z, blk] = pr.blocks[pr.i]; const mm = MAT[blk];
+        if (mm && (Vv.econ.stock[mm] || 0) < 1 && substitute(pr, mm, null)) continue;
         if (mm) { if ((Vv.econ.stock[mm] || 0) < 1) { pr.waiting = mm; break; } Vv.econ.stock[mm]--; const c = Sim.priceOf(mm, vid); pr.escrow -= c; Vv.town.treasury += c; }
         World.set(x, y, z, blk, { macro: true }); pr.i++;
         const b = pick(builders); if (b) { b.money += 0.32; b.stats.earned += 0.32; }

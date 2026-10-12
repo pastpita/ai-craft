@@ -62,6 +62,7 @@ Pages.frame = function (dt) {
   tick += dt;
   if (Pages.current === 'network') netFrame(dt);
   if (Pages.current === 'villages') mapFrame(dt);
+  if (Pages.current === 'home') pumpThoughts(dt);
   if (tick > 1) { tick = 0; render(Pages.current, false); }
 };
 Pages.bar = function () {
@@ -72,7 +73,7 @@ Pages.bar = function () {
   $('onlineN').textContent = Net.shared() ? Net.online + (Net.online === 1 ? ' viewer' : ' viewers') : '';
   $('barClock').textContent = 'DAY ' + Sim.dayOf(s.t) + ' \u00B7 ' + Sim.fmtClock(s.t);
 };
-Pages.onBeat = function (hb) { if (heroMark && Pages.current === 'home' && (hb.dd || 0) > 2) heroMark.pulse(); };
+Pages.onBeat = function (hb) { if (heroMark && Pages.current === 'home') heroMark.beat(0.5 + Math.min(0.7, (hb.dd || 0) / 12)); };
 
 // ---------------- shared bits ----------------
 // ---------------- HOME: the live village first ----------------
@@ -102,33 +103,100 @@ function workingNow(n) {
   for (const k in by) for (const a of by[k]) if (out.length < n && !out.includes(a)) out.push(a);
   return out.slice(0, n);
 }
-let homeT = 0, heroMark = null;
+let homeT = 0, heroMark = null, lastMindId = 0, lastEvId = 0, lastFireId = 0, lastFireEv = 0;
+const delta7 = (a, k) => { const h = a.scoreHist || []; if (h.length < 2) return 0; const old = h[Math.max(0, h.length - 8)]; return Math.round((a.scores[k] - (old[HKEY[k]] !== undefined ? old[HKEY[k]] : a.scores[k])) * 10) / 10; };
+const fmtN = n => Math.round(n).toLocaleString('en-US');
+// decisions per real minute: the median heartbeat, so a catch-up burst does not count
+function decPerMin() { const h = (Net.hbHist || []).slice(-30).filter(x => x >= 0).sort((x, y) => x - y); if (!h.length) return 0; return Math.round(h[h.length >> 1] * 60); }
+function sparkSVG(vals, w, h, color) {
+  if (!vals || vals.length < 2) return `<svg viewBox="0 0 ${w} ${h}" aria-hidden="true"></svg>`;
+  const mn = Math.min(...vals), mx = Math.max(...vals), sp = mx - mn || 1;
+  const pts = vals.map((v, i) => [(i / (vals.length - 1)) * (w - 4) + 2, h - 3 - ((v - mn) / sp) * (h - 6)]);
+  const last = pts[pts.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline fill="none" stroke="${color}" stroke-width="2" points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/><rect x="${(last[0] - 2).toFixed(1)}" y="${(last[1] - 2).toFixed(1)}" width="4" height="4" fill="${color}"/></svg>`;
+}
+function mindCard(a) {
+  const hist = (a.scoreHist || []).map(h => h.c);
+  return `<button class="mcard" data-mind="${a.id}"><img src="${Pages.face(a)}" alt="" width="44" height="44"><span class="n">${esc(a.name)}</span><span class="t">${esc(a.mind ? a.mind.label : '')} \u00B7 ${esc(UI.vname(a.vid))}</span><span class="sc"><span><small>COGNITION</small><br><b>${Math.round(a.scores.cognition)}</b></span>${sparkSVG(hist, 90, 26, '#8fd05a')}</span></button>`;
+}
+function bindMinds(el) { if (el) el.querySelectorAll('[data-mind]').forEach(b => b.onclick = () => Pages.go('mind', b.dataset.mind)); }
+function streamItem(m, isNew) {
+  const a = S().byId[m.agent];
+  const txt = a ? String(m.text).replace(new RegExp('^' + a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*'), '') : m.text;
+  return `<li class="${isNew ? 'new' : ''}"><time>${Sim.fmtClock(m.t)}</time>${a ? `<img src="${Pages.face(a)}" alt="" width="24" height="24">` : '<span></span>'}<span><span class="kind k-${esc(m.kind)}">${esc(String(m.kind || 'mind').toUpperCase())}</span>${a ? `<button class="who" data-mind="${a.id}">${esc(a.name)}</button> ` : ''}${esc(txt)}</span></li>`;
+}
+function eventItem(e, isNew) {
+  const c = (UI.CAT && UI.CAT[e.type]) || 'social';
+  return `<li class="${isNew ? 'new' : ''}"><time>${e.day !== Sim.dayOf(S().t) ? 'D' + e.day : Sim.fmtClock(e.t)}</time><span class="tag t-${c}">${esc((UI.CAT_LABEL && UI.CAT_LABEL[c]) || c.toUpperCase())}</span><span>${esc(e.text)}${e.vid ? UI.vtag(e.vid) : ''}</span></li>`;
+}
+// thought cards rising off the brain where a real decision lands
+const thoughtQ = [];
+function queueThought(m) { thoughtQ.push(m); if (thoughtQ.length > 6) thoughtQ.shift(); }
+let thoughtT = 0;
+function pumpThoughts(dt) {
+  thoughtT -= dt; if (thoughtT > 0 || !heroMark || !thoughtQ.length) return;
+  const box = $('hThoughts'); if (!box) return;
+  if (box.children.length >= 3) return;
+  const m = thoughtQ.shift(); const a = S().byId[m.agent]; if (!a) return;
+  thoughtT = 1.4;
+  const res = heroMark.fire({ kind: m.kind, agent: a.id, visible: true });
+  const txt = String(m.text).replace(new RegExp('^' + a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*'), '');
+  setTimeout(() => {
+    if (!heroMark || !box.isConnected) return;
+    const p = heroMark.project(res.end); const W2 = box.clientWidth;
+    const card = document.createElement('button'); card.className = 'thought k-' + (m.kind || 'decision');
+    card.style.setProperty('--c', AV.Brain.KIND_COL[m.kind] || AV.Brain.KIND_COL.decision);
+    card.innerHTML = `<img src="${Pages.face(a)}" alt=""><span><b>${esc(a.name)}</b><small>${esc(String(m.kind || 'decision').toUpperCase())}</small><br>${esc(txt.length > 72 ? txt.slice(0, 70) + '\u2026' : txt)}</span>`;
+    const left = Math.max(6, Math.min(W2 - 236, p.x - (p.x > W2 / 2 ? 216 : 20)));
+    let top = Math.max(4, p.y - 64);
+    for (const o of box.children) { const ol = parseFloat(o.style.left), ot = parseFloat(o.style.top); if (Math.abs(ol - left) < 230 && Math.abs(ot - top) < 62) top = ot + 66; }
+    card.style.left = left + 'px'; card.style.top = Math.min(box.clientHeight - 70, top) + 'px';
+    card.style.setProperty('--ax', Math.max(8, Math.min(220, p.x - left)) + 'px');
+    card.onclick = () => Pages.go('mind', a.id);
+    box.appendChild(card);
+    setTimeout(() => card.remove(), 5200);
+  }, Math.min(1400, res.ms));
+}
 function renderHome(first) {
   const el = sec('home'); const s = S();
   if (first || !el.dataset.built) {
     el.dataset.built = '1';
     el.innerHTML = `
-    <section class="hero3">
+    <section class="hero4">
       <div class="pitch">
-        <div class="markrow"><canvas id="heroMark" aria-hidden="true"></canvas><b>AI CRAFT</b></div>
+        <p class="kicker"><i class="dot"></i>LIVE \u00B7 <span id="hPop">120</span> MINDS \u00B7 5 VILLAGES \u00B7 ONE CLOCK</p>
         <h1>EVERY VILLAGER <em>THINKS</em> FOR ITSELF</h1>
-        <p class="lede">A living block world. <span id="hPop">120</span> AI villagers remember, plan, farm, chop, mine and build their own villages. Not scripted NPCs: autonomous minds you can watch, inspect and influence.</p>
+        <p class="lede">A living block world. AI villagers remember, plan, farm, chop, mine and build their own villages. Not scripted NPCs: autonomous minds you can watch, inspect and influence.</p>
         <div class="cta"><button class="btn big grass" id="goPlay">ENTER THE WORLD</button><button class="btn big plank" id="goWatch">WATCH THE VILLAGE</button></div>
         <div class="social"><a class="xlink" href="${Pages.LINKS.x}" target="_blank" rel="noopener">${XSVG}<span>Follow ${Pages.LINKS.xHandle}</span></a><span id="hLive"></span></div>
       </div>
-      <div class="livecol" aria-live="off"><div class="cap"><span>WORKING RIGHT NOW</span><span id="hClock"></span></div><div id="hWork"></div></div>
+      <div class="stage" id="hStage">
+        <canvas id="heroBrain" aria-label="The block brain. Each flash of light is a decision a villager just made."></canvas>
+        <div class="thoughts" id="hThoughts" aria-live="off"></div>
+        <span class="hovername" id="hHover" hidden></span>
+        <div class="readout"><div><b id="rThink">0</b><span>AWAKE NOW</span></div><div><b id="rDpm">0</b><span>DECISIONS / MIN</span></div><div><b id="rMem">0</b><span>MEMORIES</span></div><div><b id="rDay">1</b><span>WORLD DAY</span></div></div>
+        <p class="hint">Every flash is a real decision<span class="dk"> \u00B7 click the brain \u00B7 click a face</span></p>
+      </div>
     </section>
     <div class="rest"><div class="inner">
+      <section><p class="eyebrow"><span class="live-tag">\u25A0 LIVE</span> THE WORLD RIGHT NOW</p><h2 class="sec">One shared world, counted live</h2><div class="metrics2" id="hMetrics"></div></section>
+      <section class="live3">
+        <div><p class="eyebrow">WORKING RIGHT NOW <span id="hClock" style="margin-left:auto"></span></p><div id="hWork" class="workcol"></div></div>
+        <div><p class="eyebrow"><span class="live-tag">\u25A0</span> WHAT THEY ARE THINKING</p><ul class="stream" id="hStream"></ul></div>
+        <div><p class="eyebrow">WHAT JUST HAPPENED</p><ul class="stream evs" id="hEvents"></ul></div>
+      </section>
       <section><p class="eyebrow">HOW IT WORKS</p><h2 class="sec">Memory + needs + beliefs + goals = a decision</h2>
         <div class="recipe">
           <div class="cgrid"><div class="cslot"><img src="${UI.icon('mem')}" alt="">MEMORY</div><div class="cslot"><img src="${UI.icon('need')}" alt="">NEEDS</div><div class="cslot"><img src="${UI.icon('belief')}" alt="">BELIEFS</div><div class="cslot"><img src="${UI.icon('goal')}" alt="">GOALS</div></div>
-          <div class="arrow" aria-hidden="true">→</div>
+          <div class="arrow" aria-hidden="true">\u2192</div>
           <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap"><div class="cslot out"><img src="${UI.icon('hammer')}" alt="">TASK</div>
           <div class="steps"><div><b>Memory</b>What they saw, heard and did, weighted by importance and fading with time. Each mind keeps only as much as it can hold.</div><div><b>Needs</b>Hunger, energy, company, safety and comfort pull at every choice.</div><div><b>Beliefs</b>Not facts: what they think is true about others, including rumours that grew in the retelling.</div><div><b>Goals</b>Build a bigger home, open a shop, become mayor, feed the village. Goals turn into tasks.</div></div></div>
         </div>
       </section>
-      <section><p class="eyebrow">THE WORK</p><h2 class="sec">They build, farm and mine. For real.</h2><p class="lede" style="margin-bottom:16px">Every block you see placed, tilled or dug was placed, tilled or dug by a villager. Resources are walked to, gathered, carried and stored before anything gets built.</p><div class="work3" id="hWork3"></div></section>
-      <section><p class="eyebrow">LIVING VILLAGERS</p><h2 class="sec">Different minds, different lives</h2><div class="vill-grid" id="hVill"></div><div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn plank" id="hAll">See all ${'villagers'} on the leaderboard</button></div></section>
+      <section><p class="eyebrow">THE WORK</p><h2 class="sec">They build, farm and mine. For real.</h2><p class="lede" style="margin-bottom:16px">Every block you see placed, tilled or dug was placed, tilled or dug by a villager. Resources are walked to, gathered, carried and stored before anything gets built. When a material runs out, builders change the plan.</p><div class="work3" id="hWork3"></div></section>
+      <section><p class="eyebrow">TOP MINDS <button class="btn" id="hAll" style="margin-left:auto">Full leaderboard</button></p><h2 class="sec">Sharpest minds right now</h2><div class="minds-grid" id="hTop"></div></section>
+      <section><p class="eyebrow">LIVING VILLAGERS</p><h2 class="sec">Different minds, different lives</h2><div class="vill-grid" id="hVill"></div></section>
+      <section><p class="eyebrow">VILLAGES <button class="btn" id="hMap" style="margin-left:auto">Map and rankings</button></p><h2 class="sec">Five places, five temperaments</h2><div class="vgrid" id="hVgrid"></div></section>
       <section><p class="eyebrow">INSPECT THE MIND</p><h2 class="sec">Click any villager and see why</h2><div class="inspect"><div id="hInspect"></div>
         <ul class="points"><li><img src="${UI.icon('hammer')}" alt=""><span><b>Current task and reason</b>Not a vague mood: "Placing blocks: walls of Ivo's cottage (54/143)" because "Ivo saved 180 coins for a cottage".</span></li><li><img src="${UI.icon('mem')}" alt=""><span><b>Memory and beliefs</b>What they remember, what they believe and whether it is actually true.</span></li><li><img src="${UI.icon('pick')}" alt=""><span><b>Skills that grow</b>Farming, building, mining, trading and more rise with practice, from 0 to 100.</span></li><li><img src="${UI.icon('belief')}" alt=""><span><b>Honest labels</b>Every decision is marked BEHAVIOR ENGINE, or AI REASONING when a language model chose it.</span></li></ul></div></section>
       <section><p class="eyebrow">PERSISTENT WORLD</p><h2 class="sec">The world keeps going without you</h2><div class="world2"><div class="daybox" id="hDay"></div><div id="hHist"></div></div></section>
@@ -138,55 +206,111 @@ function renderHome(first) {
     $('goPlay').onclick = () => { G().setMode('play'); };
     $('goWatch').onclick = () => { const f = workingNow(1)[0]; if (f) G().jumpTo(f.id); else { Pages.go('world'); G().setMode('watch'); } };
     $('hAll').onclick = () => Pages.go('minds');
+    $('hMap').onclick = () => Pages.go('villages');
     if (heroMark) heroMark.destroy();
-    heroMark = AV.Brain.mount($('heroMark'), { assembled: true });
+    heroMark = null;
+    try {
+      heroMark = AV.Brain.hero($('heroBrain'), {
+        onPick: (id) => Pages.go('mind', id),
+        onHover: (id) => { const h = $('hHover'); if (!h) return; h.hidden = !id; if (id) { const a = S().byId[id]; h.textContent = nm(id) + ' \u00B7 ' + (a && a.mind ? a.mind.label : '') + ' \u00B7 cognition ' + (a ? Math.round(a.scores.cognition) : ''); } },
+      });
+      heroMark.setOrbit(alive().slice().sort((x, y) => y.scores.cognition - x.scores.cognition).slice(0, 36));
+    } catch (e) { console.warn('hero brain', e); }
+    lastMindId = 0; lastEvId = 0;
+    lastFireId = s.mindFeed[0] ? s.mindFeed[0].id : 0; lastFireEv = s.feed[0] ? s.feed[0].id : 0;
+    // open with a few of the latest thoughts
+    for (const m of s.mindFeed.slice(0, 3).reverse()) if (m.agent) queueThought(m);
+    thoughtT = 2.8;
     homeT = 99;
   }
   const L = alive();
+  const awake = L.filter(a => !a.sleeping).length;
+  const dpm = decPerMin();
   $('hPop').textContent = L.length;
-  $('hClock').textContent = 'DAY ' + Sim.dayOf(s.t) + ' · ' + Sim.fmtClock(s.t);
+  $('hClock').textContent = 'DAY ' + Sim.dayOf(s.t) + ' \u00B7 ' + Sim.fmtClock(s.t);
   $('hLive').textContent = Net.shared() ? Net.online + ' watching now' : '';
+  $('rThink').textContent = awake; $('rDpm').textContent = dpm; $('rMem').textContent = fmtN((s.counters || {}).memories || 0); $('rDay').textContent = Sim.dayOf(s.t);
+  // the brain fires for every new thought and every notable event
+  if (heroMark) {
+    heroMark.setRate(Math.max(0.8, dpm / 60));
+    const fresh = s.mindFeed.filter(m => m.id > lastFireId).slice(0, 8);
+    if (fresh.length) { lastFireId = fresh[0].id; for (const m of fresh.reverse()) if (m.agent) queueThought(m); }
+    const evs = s.feed.filter(e => e.id > lastFireEv).slice(0, 10);
+    if (evs.length) { lastFireEv = evs[0].id; for (const e of evs) { const c = (UI.CAT && UI.CAT[e.type]) || ''; heroMark.fire({ kind: c === 'crime' ? 'crime' : c === 'politics' ? 'politics' : c === 'economy' ? 'trade' : (e.type || '').startsWith('CONSTRUCTION') || e.type === 'BUILDING_CREATED' ? 'build' : 'social', len: 12 + Math.floor((e.imp || 0.4) * 14) }); } }
+  }
   // the working-now slots refresh every couple of seconds
   homeT += 1;
-  const wk = workingNow(5);
+  const wk = workingNow(6);
   const sig = wk.map(a => a.id + (a.task ? a.task.t : '')).join('|');
   if ($('hWork').dataset.sig !== sig) {
     $('hWork').dataset.sig = sig;
-    $('hWork').innerHTML = wk.map(a => { const k = KIND(a) || ['goal']; return `<button class="workslot" data-jump="${a.id}"><img src="${Pages.face(a)}" alt=""><span><span class="who">${esc(a.name)}</span> <span style="color:var(--dim);font-size:12px">${esc(AV.JOBS[a.job] ? AV.JOBS[a.job].label : '')} · ${esc(UI.vname(a.vid))}</span><br><span class="what">${esc(a.task.t)}</span></span><img class="ico8" src="${UI.icon(k[0])}" alt=""></button>`; }).join('') || '<div class="workslot" style="display:block">' + (Sim.hourOf(s.t) >= 20 || Sim.hourOf(s.t) < 6 ? 'Night has fallen. The villagers are asleep; work starts at dawn.' : 'Between jobs: villagers are eating, talking or walking to work.') + '</div>';
+    $('hWork').innerHTML = wk.map(a => { const k = KIND(a) || ['goal']; return `<button class="workslot" data-jump="${a.id}"><img src="${Pages.face(a)}" alt=""><span><span class="who">${esc(a.name)}</span> <span style="color:var(--dim);font-size:12px">${esc(AV.JOBS[a.job] ? AV.JOBS[a.job].label : '')} \u00B7 ${esc(UI.vname(a.vid))}</span><br><span class="what">${esc(a.task.t)}</span></span><img class="ico8" src="${UI.icon(k[0])}" alt=""></button>`; }).join('') || '<div class="workslot" style="display:block">' + (Sim.hourOf(s.t) >= 20 || Sim.hourOf(s.t) < 6 ? 'Night in the villages: everyone is asleep. Work starts at 06:00, in about ' + Math.max(1, Math.round((((6 * 60 - (s.t % 1440)) + 1440) % 1440) / 1.2 / 60)) + ' real minutes.' : 'Between jobs: villagers are eating, talking or walking to work.') + '</div>';
     $('hWork').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => G().jumpTo(b.dataset.jump));
   }
-  if (homeT < 5 && !first) return;
+  // live streams
+  const mf = s.mindFeed.slice(0, 12);
+  if (!mf.length || mf[0].id !== lastMindId) { $('hStream').innerHTML = mf.map(m => streamItem(m, lastMindId && m.id > lastMindId)).join('') || '<li><span></span><span></span><span style="color:var(--dim)">The minds are waking up.</span></li>'; lastMindId = mf[0] ? mf[0].id : 0; bindMinds($('hStream')); }
+  const ev = s.feed.filter(e => (e.imp || 0) >= 0.45 && e.type !== 'DAY_START').slice(0, 12);
+  if (!ev.length || ev[0].id !== lastEvId) { $('hEvents').innerHTML = ev.map(e => eventItem(e, lastEvId && e.id > lastEvId)).join('') || '<li><span></span><span></span><span style="color:var(--dim)">Quiet so far.</span></li>'; lastEvId = ev[0] ? ev[0].id : 0; }
+  if (homeT < 4 && !first) return;
   homeT = 0;
-  // build / farm / mine
-  const W0 = s.counters.work || {}, D0 = s.counters.workDay || {};
+  // the world in numbers
+  const c = s.counters || {}, W0 = c.work || {}, D0 = c.workDay || {};
   const today = k => Math.max(0, (W0[k] || 0) - (D0[k] || 0));
+  const ws = Sim.worldStats(); const H = s.statsHist || [];
+  const series = k => H.map(h => h[k]).concat([ws[k]]);
+  const coins = L.reduce((x, a) => x + (a.money || 0), 0);
+  const metrics = [
+    ['brain', 'MINDS ONLINE', L.length, '', 1],
+    ['need', 'AWAKE NOW', awake, L.length - awake + ' asleep', 1],
+    ['goal', 'DECISIONS / MIN', dpm, sparkSVG((Net.hbHist || []).slice(-30), 90, 22, '#8fd05a'), 1],
+    ['goal', 'DECISIONS MADE', fmtN(c.decisions || 0), ''],
+    ['mem', 'MEMORIES FORMED', fmtN(c.memories || 0), fmtN(ws.memories) + ' held now'],
+    ['belief', 'CONVERSATIONS', fmtN(c.convos || 0), ''],
+    ['belief', 'BELIEFS HELD', fmtN(ws.beliefs), sparkSVG(series('beliefs'), 90, 22, '#e0773a')],
+    ['need', 'STRONG BONDS', fmtN(ws.relationships), sparkSVG(series('relationships'), 90, 22, '#7fb8e6')],
+    ['hammer', 'BLOCKS PLACED', fmtN(W0.blocks || 0), today('blocks') + ' today'],
+    ['wheat', 'WHEAT HARVESTED', fmtN(W0.harvested || 0), today('harvested') + ' today'],
+    ['house', 'BUILDINGS', fmtN(ws.buildings), s.projects.filter(p => !p.done).length + ' underway'],
+    ['coin', 'COINS IN POCKETS', fmtN(coins), ''],
+  ];
+  $('hMetrics').innerHTML = metrics.map(([ic, k, v, sub, brainy]) => `<div class="metric2 ${brainy ? 'brainy' : ''}"><img src="${UI.icon(ic === 'brain' ? 'mem' : ic)}" alt=""><span class="k">${k}</span><b>${esc(v)}</b><span class="sub">${sub && sub.startsWith('<svg') ? sub : esc(sub)}</span></div>`).join('');
+  // build / farm / mine
   const cols = [
     ['hammer', 'BUILD', [['blocks', 'blocks placed today', today('blocks')], ['proj', 'buildings underway', s.projects.filter(p => !p.done).length]], 'build'],
     ['hoe', 'FARM', [['planted', 'seeds planted today', today('planted')], ['harvested', 'wheat harvested today', today('harvested')]], 'farm'],
     ['pick', 'MINE & CHOP', [['wood', 'wood brought in today', today('wood')], ['stone', 'stone and ore today', today('stone')]], 'mine'],
   ];
-  const busy = {}; for (const a of L) { const k = KIND(a); if (!k) continue; const c = k[1] === 'wood' || k[1] === 'carry' ? 'mine' : k[1]; (busy[c] = busy[c] || []).push(a); }
+  const busy = {}; for (const a of L) { const k = KIND(a); if (!k) continue; const cc = k[1] === 'wood' || k[1] === 'carry' ? 'mine' : k[1]; (busy[cc] = busy[cc] || []).push(a); }
   $('hWork3').innerHTML = cols.map(([ic, title, nums, key]) => `<div class="wcol"><div class="head"><img src="${UI.icon(ic)}" alt=""><b>${title}</b></div><div class="nums">${nums.map(([, l, v]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div><ul>${(busy[key] || []).slice(0, 4).map(a => `<li><button data-jump="${a.id}"><img src="${Pages.face(a)}" alt=""><span><b>${esc(a.name)}</b> ${esc(a.task ? a.task.t : '')}</span></button></li>`).join('') || '<li style="color:var(--dim);font-size:13px;padding:4px 2px">Nobody at it right now.</li>'}</ul></div>`).join('');
   $('hWork3').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => G().jumpTo(b.dataset.jump));
+  // top minds
+  const top = L.slice().sort((x, y) => y.scores.cognition - x.scores.cognition).slice(0, 8);
+  const tsig = top.map(a => a.id + Math.round(a.scores.cognition)).join();
+  if ($('hTop').dataset.sig !== tsig) { $('hTop').dataset.sig = tsig; $('hTop').innerHTML = top.map(mindCard).join(''); bindMinds($('hTop')); }
   // living villagers: a spread of personalities
   const featured = L.filter(a => a.core || a.featured).sort((x, y) => (y.scores.cognition) - (x.scores.cognition));
   const pickV = []; const types = new Set(); for (const a of featured) { if (pickV.length >= 8) break; const t = a.mind ? a.mind.type : ''; if (!types.has(t) || pickV.length >= 5) { types.add(t); pickV.push(a); } }
-  $('hVill').innerHTML = pickV.map(a => `<button class="vcard2" data-mind="${a.id}"><span class="top"><img src="${Pages.face(a, 6)}" alt=""><span><span class="n">${esc(a.name)}</span><br><span class="r">${esc(AV.JOBS[a.job] ? AV.JOBS[a.job].label : '')} in ${esc(UI.vname(a.vid))} · ${esc(a.mind ? a.mind.label : '')}</span></span></span><span class="traits">${UI.traitChips(a, 3)}</span><span class="task"><small>NOW</small>${esc(a.task ? a.task.t : UI.planWord(a))}</span></button>`).join('');
+  $('hVill').innerHTML = pickV.map(a => `<button class="vcard2" data-mind="${a.id}"><span class="top"><img src="${Pages.face(a, 6)}" alt=""><span><span class="n">${esc(a.name)}</span><br><span class="r">${esc(AV.JOBS[a.job] ? AV.JOBS[a.job].label : '')} in ${esc(UI.vname(a.vid))} \u00B7 ${esc(a.mind ? a.mind.label : '')}</span></span></span><span class="traits">${UI.traitChips(a, 3)}</span><span class="task"><small>NOW</small>${esc(a.task ? a.task.t : UI.planWord(a))}</span></button>`).join('');
   bindMinds($('hVill'));
+  // villages
+  $('hVgrid').innerHTML = W.VILLAGES.map(v => villageCard(v.id)).join('');
+  $('hVgrid').querySelectorAll('[data-v]').forEach(b => b.onclick = () => { Pages.focusVillage = b.dataset.v; Pages.go('villages'); });
   // inspection example: the most interesting worker
   const ex = workingNow(1)[0] || featured[0];
   if (ex) {
-    const top = Sim.topRelations(ex, 2);
-    $('hInspect').innerHTML = `<div class="icard"><div class="h"><img src="${Pages.face(ex, 8)}" alt=""><span><b>${esc(ex.name)}</b><span>${esc(AV.JOBS[ex.job] ? AV.JOBS[ex.job].label : '')} · ${esc(UI.vname(ex.vid))} · ${esc(ex.moodLabel)}</span></span><button class="btn" data-jump="${ex.id}">INSPECT IN WORLD</button></div><div class="body">${UI.taskBlock(ex, true)}<div class="kv2"><span>PERSONALITY</span><span>${UI.traitChips(ex, 4)}</span><span>GOAL</span><span>${esc(UI.goalText(((ex.goals || []).find(g => g.primary) || (ex.goals || [])[0])))}</span><span>MEMORY</span><span>${esc((ex.memories[ex.memories.length - 1] || { text: 'Nothing worth remembering yet today.' }).text)}</span><span>FRIENDS</span><span>${esc(top.friends.map(f => nm(f.id)).join(', ') || '-')}</span></div>${UI.inventory(ex)}${UI.skillBars(ex, 4)}</div></div>`;
+    const tr = Sim.topRelations(ex, 2);
+    $('hInspect').innerHTML = `<div class="icard"><div class="h"><img src="${Pages.face(ex, 8)}" alt=""><span><b>${esc(ex.name)}</b><span>${esc(AV.JOBS[ex.job] ? AV.JOBS[ex.job].label : '')} \u00B7 ${esc(UI.vname(ex.vid))} \u00B7 ${esc(ex.moodLabel)}</span></span><button class="btn" data-jump="${ex.id}">INSPECT IN WORLD</button></div><div class="body">${UI.taskBlock(ex, true)}<div class="kv2"><span>PERSONALITY</span><span>${UI.traitChips(ex, 4)}</span><span>GOAL</span><span>${esc(UI.goalText(((ex.goals || []).find(g => g.primary) || (ex.goals || [])[0])))}</span><span>MEMORY</span><span>${esc((ex.memories[ex.memories.length - 1] || { text: 'Nothing worth remembering yet today.' }).text)}</span><span>FRIENDS</span><span>${esc(tr.friends.map(f => nm(f.id)).join(', ') || '-')}</span></div>${UI.inventory(ex)}${UI.skillBars(ex, 4)}</div></div>`;
     $('hInspect').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => G().jumpTo(b.dataset.jump));
   }
   // persistent world
   const tiers = W.VILLAGES.map(v => [v, s.villages[v.id]]);
   $('hDay').innerHTML = `<div class="big"><small>WORLD DAY</small>${Sim.dayOf(s.t)}</div><div style="color:var(--muted);font-size:14.5px;line-height:1.5">One clock for everyone: a world day lasts 20 real minutes. Close the tab and the villages keep working; come back to what changed.</div>${tiers.map(([v, Vv]) => `<div class="tierrow"><span>${esc(v.name)}</span><span class="bar"><i style="width:${Math.min(100, Math.round((Vv.tierScore || 0) / 58 * 100))}%;background:${v.color}"></i></span><b class="mono" style="font-size:12px">${esc(Vv.tier)}</b></div>`).join('')}`;
   const hist = s.history.filter(h => !h.minor).slice(-6).reverse();
-  $('hHist').innerHTML = `<ul class="timeline">${hist.map(h => `<li class="major"><span class="d">DAY ${h.day} · ${esc(String(h.kind || '').toUpperCase())}</span>${h.vid ? UI.vtag(h.vid) : ''}<div class="tx">${esc(h.text)}</div></li>`).join('')}</ul><button class="btn plank" id="hHistAll" style="margin-top:10px">Full world history</button>`;
+  $('hHist').innerHTML = `<ul class="timeline">${hist.map(h => `<li class="major"><span class="d">DAY ${h.day} \u00B7 ${esc(String(h.kind || '').toUpperCase())}</span>${h.vid ? UI.vtag(h.vid) : ''}<div class="tx">${esc(h.text)}</div></li>`).join('')}</ul><button class="btn plank" id="hHistAll" style="margin-top:10px">Full world history</button>`;
   $('hHistAll').onclick = () => Pages.go('history');
 }
+Pages.heroFrame = function (dt) { if (Pages.current === 'home') pumpThoughts(dt); };
 
 function villageCard(vid) {
   const s = S(); const V = s.villages[vid]; const st = Sim.stats(vid);

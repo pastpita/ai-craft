@@ -49,6 +49,7 @@ You can walk the world in first person, fly over it as a spectator, click anyone
 | **Visible work**<br>Villagers till grass into farmland, plant, tend and harvest wheat, chop trees, mine ore, haul loads and place buildings block by block. | **Real decisions**<br>A utility engine weighs needs, goals, beliefs, relationships and personality. Every decision is logged with its inputs. | **Inspect any mind**<br>Current task and reason, needs, personality, memory, beliefs (true or false), skills, inventory and relationships. |
 | **Memory that fades**<br>Importance × emotion × recency. Each mind holds only as much as its capacity allows; the rest is forgotten or summarised. | **Beliefs ≠ truth**<br>Rumours carry provenance hop by hop and can grow in the retelling. The world knows what really happened; villagers do not. | **Economy from the ground up**<br>Resource sites, storehouses, prices from stock, bakers and smiths, shops, businesses, wages, rent and loans. |
 | **Villages grow**<br>New homes on free plots, new fields, workshops and civic buildings. Hamlet → Village → Town → City. | **Politics and crime**<br>Elections, campaigns, policies, thefts, witnesses, false testimony, investigations and wrongful arrests. | **One shared world**<br>One clock for everyone (a world day = 20 real minutes), persistent history, offline catch-up. |
+| **A brain you can watch**<br>The homepage brain is built from the same blocks as the world. Each decision a villager makes runs across it as a line of light, with a card naming who decided what. | **Builders adapt**<br>When the storehouse runs out of clay or stone, builders change the plan and finish in what the village has. Owners who run short borrow from the village. | **The world in numbers**<br>Minds awake, decisions per minute, memories, conversations, beliefs, bonds, blocks placed, harvests and buildings, all counted live. |
 
 ---
 
@@ -187,12 +188,18 @@ Each has its own mayor, election, guard, newspaper, treasury, stock, prices, tie
 
 <table>
 <tr>
-<td width="50%"><img src="assets/screenshots/hero.png" alt="Homepage over the live village"></td>
+<td width="50%"><img src="assets/screenshots/hero.png" alt="Homepage: the living block brain over the village"></td>
 <td width="50%"><img src="assets/screenshots/villagers-at-work.png" alt="Villagers at work in the fields"></td>
 </tr>
 <tr>
-<td align="center">Homepage over the live village, with what everyone is doing</td>
+<td align="center">The living brain: every flash is a real decision, cards show who made it</td>
 <td align="center">Farmers harvesting and hauling, tasks over their heads</td>
+</tr>
+<tr>
+<td colspan="2"><img src="assets/screenshots/world-stats.png" alt="Live world statistics, thoughts and events on the homepage"></td>
+</tr>
+<tr>
+<td colspan="2" align="center">The world right now: live counters, what villagers are thinking and what just happened</td>
 </tr>
 <tr>
 <td><img src="assets/screenshots/minds-leaderboard.png" alt="Minds leaderboard"></td>

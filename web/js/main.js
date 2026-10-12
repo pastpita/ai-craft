@@ -526,7 +526,7 @@ function pickCinemaFocus() {
 G.cinemaFocus = function () { const f = pickCinemaFocus(); cine.tx = f.x; cine.tz = f.z; cine.id = f.id; cine.t = 0; if (!cine.x) { cine.x = f.x; cine.z = f.z; } return f; };
 function cinemaFrame(dt, now) {
   const s = S();
-  const pg = $('page'); const hero = document.querySelector('.hero3');
+  const pg = $('page'); const hero = document.querySelector('.hero4');
   const heroH = hero ? hero.offsetHeight : 600;
   if (pg.scrollTop > heroH * 0.85) { UI.clearLabels(); return; }
   if ((cine.t += dt) > 22 || !cine.tx) G.cinemaFocus();
