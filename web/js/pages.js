@@ -157,6 +157,171 @@ function pumpThoughts(dt) {
     setTimeout(() => card.remove(), 5200);
   }, Math.min(1400, res.ms));
 }
+// ---------------- CIVILIZATION on the homepage ----------------
+const Civ = () => AV.Civ;
+const SNAP_PAL = ['#000000', '#6c9a3f', '#7a5636', '#8d8f8a', '#3f6f9e', '#d8c48c', '#5a3c22', '#4d7a2e', '#b48a54', '#a68a5c', '#a8423a', '#5c6b7a', '#e4dccb', '#c9b04a', '#ffd060', '#9a8070'].map(c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]);
+const snapCache = new WeakMap();
+function snapBytes(sn) { let u = snapCache.get(sn); if (u) return u; const bin = atob(sn.px); u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); snapCache.set(sn, u); return u; }
+function drawSnap(cv, sn, area) {
+  if (!cv || !sn || !sn.px) return;
+  const u = snapBytes(sn); const Wd = sn.w;
+  const [x0, z0, w, h] = area || [0, 0, sn.w, sn.h];
+  if (cv.width !== w) { cv.width = w; cv.height = h; }
+  const g = cv.getContext('2d'); const img = g.createImageData(w, h);
+  for (let z = 0; z < h; z++) for (let x = 0; x < w; x++) {
+    const X = x0 + x, Z = z0 + z; const o = (z * w + x) * 4;
+    if (X < 0 || Z < 0 || X >= sn.w || Z >= sn.h) { img.data[o + 3] = 255; continue; }
+    const v = u[X + Z * Wd]; const c = SNAP_PAL[v >> 4]; const hgt = v & 15;
+    const sh = 0.7 + Math.min(0.55, hgt * 0.06);
+    img.data[o] = Math.min(255, c[0] * sh); img.data[o + 1] = Math.min(255, c[1] * sh); img.data[o + 2] = Math.min(255, c[2] * sh); img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+const fmtK = (n) => { n = Math.round(n || 0); return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n.toLocaleString('en-US'); };
+const tn = { area: 'valley', then: null, nowSnap: null, nowAt: 0, loaded: false, pos: 50 };
+function tnArea() { if (tn.area === 'valley') return null; const v = W.VBY[tn.area]; const R = v.r + 22; return [v.cx - R, v.cz - R, R * 2, R * 2]; }
+function civStatsHTML(s) {
+  const m = s.metrics || {}; const T = Civ().worldTotals(); const last = (s.metricsHist || [])[(s.metricsHist || []).length - 1] || {};
+  const today = (k, v) => { const d = Math.round((v || 0) - (last[k] || 0)); return d > 0 ? '+' + fmtK(d) + ' today' : ''; };
+  const tiles = [
+    ['clock', 'WORLD DAY', Sim.dayOf(s.t), Sim.fmtClock(s.t), 1],
+    ['need', 'POPULATION', T.pop, 'peak ' + fmtK(m.populationPeak || T.pop), 1],
+    ['house', 'BUILDINGS', T.buildings, (s.projects || []).filter(p => !p.done).length + ' under construction', 1],
+    ['house', 'HOUSES BUILT', m.housesBuilt || 0, today('housesBuilt', m.housesBuilt)],
+    ['hammer', 'BLOCKS PLACED', m.blocksPlaced || 0, today('blocksPlaced', m.blocksPlaced)],
+    ['pick', 'BLOCKS MINED', m.blocksMined || 0, today('blocksMined', m.blocksMined)],
+    ['hoe', 'FARM TILES', m.farmTiles || 0, (m.seedsPlanted ? fmtK(m.seedsPlanted) + ' seeds planted' : '')],
+    ['wheat', 'CROPS HARVESTED', m.cropsHarvested || 0, today('cropsHarvested', m.cropsHarvested)],
+    ['axe', 'TREES CUT', m.treesCut || 0, fmtK(m.logsCut || 0) + ' logs'],
+    ['coin', 'TRADE VOLUME', m.tradeVolume || 0, 'craft coins spent'],
+    ['coin', 'TOTAL WEALTH', T.wealth, fmtK(T.deposits) + ' in banks'],
+    ['goal', 'BUSINESSES', m.businessesCreated || 0, (m.loansIssued ? fmtK(m.loansIssued) + ' loans issued' : '')],
+  ];
+  return tiles.map(([ic, k, v, sub, big]) => `<div class="cstat ${big ? 'big' : ''}"><span class="ic"><img src="${UI.icon(ic === 'clock' ? 'belief' : ic)}" alt=""></span><span class="k">${k}</span><b>${typeof v === 'number' ? fmtK(v) : esc(v)}</b><span class="sub">${esc(sub || '')}</span></div>`).join('');
+}
+function levelsHTML(s) {
+  return W.VILLAGES.map(v => {
+    const r = Civ().stageReport(v.id); const lvl = r.stage + 1;
+    const bar = Math.round(r.progress * 10);
+    return `<div class="lvl" style="--vc:${v.color}"><div class="lh"><span class="vn">${esc(v.name)}</span><span class="tag">${esc(r.name.toUpperCase())}</span><span class="lv">LEVEL ${lvl}</span></div>
+      <div class="pbar" role="img" aria-label="${Math.round(r.progress * 100)}% to ${esc(r.next || 'max')}">${Array.from({ length: 10 }, (_, i) => `<i class="${i < bar ? 'on' : ''}"></i>`).join('')}<b>${Math.round(r.progress * 100)}%</b></div>
+      <div class="nx">${r.next ? 'NEXT: <b>' + esc(r.next.toUpperCase()) + '</b>' : '<b>THE LARGEST STAGE</b>'}</div>
+      <ul class="req">${r.reqs.map(q => `<li class="${q.ok ? 'ok' : ''}"><span>${q.ok ? '\u2714' : '\u2716'} ${esc(q.label)}</span><span class="mono">${q.need === 1 && (q.k === 'square' || q.k === 'townhall' || q.k === 'bank') ? (q.ok ? 'built' : 'not yet') : fmtK(q.have) + ' / ' + fmtK(q.need)}</span></li>`).join('')}</ul>
+      <div class="lf"><span>${r.pop} residents</span><span>${r.buildings} buildings</span><span>${fmtK(r.wealth)} coins</span></div></div>`;
+  }).join('');
+}
+function reportHTML(r) {
+  if (!r) return '<p class="muted">The first report is written at the end of day 1.</p>';
+  const d = r.delta || {}; const lines = [['housesBuilt', 'houses built'], ['buildingsCompleted', 'buildings finished'], ['blocksPlaced', 'blocks placed'], ['blocksMined', 'blocks mined'], ['treesCut', 'trees cut'], ['cropsHarvested', 'crops harvested'], ['farmTiles', 'farm tiles dug'], ['arrivals', 'new residents'], ['businessesCreated', 'new businesses'], ['roadsPaved', 'road blocks paved'], ['tradeVolume', 'coins traded']];
+  return `<div class="rep"><div class="rh">DAY ${r.d} COMPLETE</div><ul>${lines.filter(([k]) => (d[k] || 0) > 0).map(([k, l]) => `<li><b>+${fmtK(d[k])}</b> ${l}</li>`).join('') || '<li>A quiet day.</li>'}</ul>${r.top ? `<p class="rt">${esc(r.top)}</p>` : ''}</div>`;
+}
+function weekHTML(w) {
+  if (!w) return '<p class="muted">The first weekly report comes on day 7.</p>';
+  const row = (l, a, b, f) => `<li><span>${l}</span><span class="mono">${f ? f(a) : fmtK(a)} \u2192 <b>${f ? f(b) : fmtK(b)}</b></span></li>`;
+  return `<div class="rep"><div class="rh">WEEK ${w.w}</div><ul class="wk">${row('Population', w.from.pop, w.to.pop)}${row('Buildings', w.from.bld, w.to.bld)}${row('Wealth', w.from.wealth, w.to.wealth)}${row('Blocks placed', w.from.blocksPlaced, w.to.blocksPlaced)}</ul>${w.food !== null ? `<p class="rt">Food production ${w.food >= 0 ? '+' : ''}${w.food}%${w.crime !== null ? ' \u00B7 crime ' + (w.crime >= 0 ? '+' : '') + w.crime + '%' : ''}</p>` : ''}${w.big ? `<p class="rt"><b>Biggest event:</b> ${esc(w.big)}</p>` : ''}</div>`;
+}
+const gstate = { key: 'pop' };
+function drawGrowth(s) {
+  const cv = $('gChart'); if (!cv) return;
+  const H = (s.metricsHist || []).slice(); const T = Civ().worldTotals();
+  const cur = { d: Sim.dayOf(s.t), pop: T.pop, bld: T.buildings, wealth: T.wealth, blocksPlaced: (s.metrics || {}).blocksPlaced || 0, food: T.food };
+  const pts = H.concat(cur).map(r => [r.d, r[gstate.key] || 0]);
+  const r = cv.getBoundingClientRect(); if (!r.width) return; const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+  const L = 8 * dpr, Bm = 18 * dpr, Tp = 14 * dpr, w = cv.width - L * 2, h = cv.height - Bm - Tp;
+  const mx = Math.max(1, ...pts.map(p => p[1])); const d0 = pts[0][0], d1 = Math.max(d0 + 1, pts[pts.length - 1][0]);
+  const px = 4 * dpr;
+  g.fillStyle = 'rgba(255,255,255,0.05)'; for (let i = 0; i <= 4; i++) g.fillRect(L, Tp + h * i / 4, w, dpr);
+  g.fillStyle = '#8fd05a';
+  // stepped pixel line: one block per sample, filled down to the axis
+  for (let i = 0; i < pts.length; i++) {
+    const x = L + (pts[i][0] - d0) / (d1 - d0) * (w - px); const y = Tp + h - pts[i][1] / mx * h;
+    const nx = i + 1 < pts.length ? L + (pts[i + 1][0] - d0) / (d1 - d0) * (w - px) : x + px;
+    g.fillStyle = 'rgba(143,208,90,0.18)'; g.fillRect(x, y, Math.max(px, nx - x), Tp + h - y);
+    g.fillStyle = '#8fd05a'; g.fillRect(x, y - px / 2, Math.max(px, nx - x), px);
+  }
+  g.font = `${11 * dpr}px "IBM Plex Mono", monospace`; g.fillStyle = '#c2b89f'; g.textAlign = 'left';
+  g.fillText('day ' + d0, L, cv.height - 4 * dpr); g.textAlign = 'right'; g.fillText('day ' + pts[pts.length - 1][0] + ' \u00B7 ' + fmtK(pts[pts.length - 1][1]), L + w, cv.height - 4 * dpr);
+  g.textAlign = 'left'; g.fillText(fmtK(mx), L, Tp - 3 * dpr);
+}
+function contribHTML(s) {
+  const L = alive(); const c = (a, k) => (a.contrib && a.contrib[k]) || 0;
+  const cats = [
+    ['TOP BUILDERS', a => c(a, 'blocksPlaced'), 'blocks placed', 'hammer'],
+    ['TOP FARMERS', a => c(a, 'cropsHarvested') + c(a, 'seedsPlanted') * 0.5, null, 'wheat', a => fmtK(c(a, 'cropsHarvested')) + ' crops harvested'],
+    ['TOP MINERS', a => c(a, 'blocksMined'), 'blocks mined', 'pick'],
+    ['TOP WOODCUTTERS', a => c(a, 'logsCut'), 'logs cut', 'axe'],
+    ['TOP HAULERS', a => c(a, 'hauls') + c(a, 'materialsDelivered') / 8, null, 'log', a => fmtK(c(a, 'hauls')) + ' loads carried'],
+    ['RICHEST', a => a.money + ((s.villages[a.vid].bank || {}).deposits || {})[a.id] || 0, null, 'coin', a => fmtK(a.money + (((s.villages[a.vid].bank || {}).deposits || {})[a.id] || 0)) + ' coins'],
+    ['SMARTEST MINDS', a => a.scores.cognition, null, 'mem', a => 'cognition ' + Math.round(a.scores.cognition)],
+    ['MOST INFLUENTIAL', a => a.scores.influence, null, 'belief', a => 'influence ' + Math.round(a.scores.influence)],
+  ];
+  return cats.map(([title, f, unit, ic, lab]) => {
+    const top = L.slice().sort((x, y) => f(y) - f(x)).filter(a => f(a) > 0).slice(0, 3);
+    if (!top.length) return `<div class="ccat"><div class="ct"><img src="${UI.icon(ic)}" alt="">${title}</div><p class="muted">Nobody yet.</p></div>`;
+    const t = (a) => lab ? lab(a) : fmtK(f(a)) + ' ' + unit;
+    return `<div class="ccat"><div class="ct"><img src="${UI.icon(ic)}" alt="">${title}</div><button class="c1" data-mind="${top[0].id}"><img src="${Pages.face(top[0], 6)}" alt=""><span><small>#1</small><b>${esc(top[0].name)}</b><br>${esc(t(top[0]))}</span></button>${top.slice(1).map((a, i) => `<button class="cn" data-mind="${a.id}"><small>#${i + 2}</small> ${esc(a.name)} <span>${esc(t(a))}</span></button>`).join('')}</div>`;
+  }).join('');
+}
+function tnRender(force) {
+  const s = S(); const area = tnArea();
+  if (force || !tn.nowSnap || performance.now() - tn.nowAt > 20000) { tn.nowSnap = AV.Sync.snapshot(Sim.dayOf(s.t)); tn.nowAt = performance.now(); }
+  const days = Object.keys(Net.snaps).map(Number).sort((a, b) => a - b);
+  if (tn.then === null && days.length) tn.then = days[0];
+  const thenSnap = tn.then !== null ? Net.snaps[tn.then] : null;
+  drawSnap($('tnA'), thenSnap || tn.nowSnap, area); drawSnap($('tnB'), tn.nowSnap, area);
+  $('tnLblA').textContent = thenSnap ? 'DAY ' + tn.then : 'LOADING';
+  $('tnLblB').textContent = 'TODAY \u00B7 DAY ' + Sim.dayOf(s.t);
+  $('tnThen').textContent = thenSnap ? tn.then : '1';
+  $('tnDays').innerHTML = days.map(d => `<button class="chip ${d === tn.then ? 'on' : ''}" data-d="${d}">DAY ${d}</button>`).join('');
+  $('tnDays').querySelectorAll('[data-d]').forEach(b => b.onclick = () => { tn.then = +b.dataset.d; tnRender(); });
+  const H = s.metricsHist || []; const first = H.find(r => r.d >= (tn.then || 1)) || H[0]; const T = Civ().worldTotals(); const m = s.metrics || {};
+  $('tnFacts').innerHTML = `<div class="tnf"><span>THEN</span><b>DAY ${thenSnap ? tn.then : 1}</b></div><div class="tnf"><span>NOW</span><b>DAY ${Sim.dayOf(s.t)}</b></div>
+    <ul class="tnl"><li><span>Residents</span><b>${first ? first.pop : '?'} \u2192 ${T.pop}</b></li><li><span>Buildings</span><b>${first ? first.bld : '?'} \u2192 ${T.buildings}</b></li><li><span>Blocks placed</span><b>${fmtK(m.blocksPlaced)}</b></li><li><span>Wealth</span><b>${first ? fmtK(first.wealth) : '?'} \u2192 ${fmtK(T.wealth)}</b></li></ul>`;
+}
+function tnInit() {
+  $('tnArea').innerHTML = ['valley'].concat(W.VILLAGES.map(v => v.id)).map(a => `<button class="chip ${a === tn.area ? 'on' : ''}" data-a="${a}">${a === 'valley' ? 'VALLEY' : esc(W.VBY[a].name.toUpperCase())}</button>`).join('');
+  $('tnArea').querySelectorAll('[data-a]').forEach(b => b.onclick = () => { tn.area = b.dataset.a; $('tnArea').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === b)); tnRender(); });
+  const set = (v) => { tn.pos = v; $('tnB').style.clipPath = `inset(0 0 0 ${v}%)`; $('tnHandle').style.left = v + '%'; };
+  $('tnRange').oninput = () => set(+$('tnRange').value); set(tn.pos);
+  $('shareBtn').onclick = makeShareCard;
+  if (!tn.loaded) { tn.loaded = true; Net.loadSnaps().then(() => { tn.then = null; tnRender(); }); }
+  tnRender(true);
+}
+function makeShareCard() {
+  const s = S(); const T = Civ().worldTotals(); const m = s.metrics || {};
+  const cv = document.createElement('canvas'); cv.width = 1200; cv.height = 675; const g = cv.getContext('2d');
+  g.fillStyle = '#15130f'; g.fillRect(0, 0, 1200, 675);
+  const map = document.createElement('canvas'); drawSnap(map, AV.Sync.snapshot(Sim.dayOf(s.t)), tnArea());
+  g.imageSmoothingEnabled = false; g.drawImage(map, 36, 36, 603, 603);
+  g.strokeStyle = '#5e5b53'; g.lineWidth = 6; g.strokeRect(33, 33, 609, 609);
+  const tierN = {}; for (const v of W.VILLAGES) { const t = s.villages[v.id].tier; tierN[t] = (tierN[t] || 0) + 1; }
+  g.fillStyle = '#8fd05a'; g.font = '700 30px Silkscreen, "Pixelify Sans", monospace'; g.fillText('AI CRAFT', 680, 92);
+  g.fillStyle = '#fff3d6'; g.font = '700 54px "Pixelify Sans", monospace'; g.fillText('WORLD DAY ' + Sim.dayOf(s.t), 680, 160);
+  const rows = [[T.pop, 'AI RESIDENTS'], [T.buildings, 'BUILDINGS'], [m.blocksPlaced || 0, 'BLOCKS PLACED'], [m.blocksMined || 0, 'BLOCKS MINED'], [m.cropsHarvested || 0, 'CROPS HARVESTED']];
+  rows.forEach(([v, l], i) => { g.fillStyle = '#8fd05a'; g.font = '600 38px "IBM Plex Mono", monospace'; g.fillText(fmtK(v), 680, 238 + i * 62); g.fillStyle = '#c2b89f'; g.font = '700 20px "Pixelify Sans", monospace'; g.fillText(l, 680 + Math.max(150, g.measureText(fmtK(v)).width + 70), 236 + i * 62); });
+  g.fillStyle = '#fff3d6'; g.font = '700 34px "Pixelify Sans", monospace'; g.fillText('FROM A CAMP', 680, 576); g.fillStyle = '#8fd05a'; g.fillText('TO A ' + (tierN.City ? 'CITY.' : tierN.Town ? 'TOWN.' : 'VILLAGE.'), 680, 616);
+  g.fillStyle = '#8f866f'; g.font = '16px "IBM Plex Mono", monospace'; g.fillText(Pages.LINKS.xHandle + ' \u00B7 every block placed by AI', 680, 650);
+  const url = cv.toDataURL('image/png');
+  const post = 'AI CRAFT \u00B7 world day ' + Sim.dayOf(s.t) + ': ' + T.pop + ' AI residents, ' + T.buildings + ' buildings, ' + fmtK(m.blocksPlaced) + ' blocks placed, ' + fmtK(m.blocksMined) + ' mined. From a camp to a ' + (tierN.City ? 'city' : tierN.Town ? 'town' : 'village') + ', block by block. ' + Pages.LINKS.xHandle;
+  $('shareOut').innerHTML = `<img class="sharecard" src="${url}" alt="Share card: world day ${Sim.dayOf(s.t)} statistics with an aerial view"><p class="muted" style="font-size:12.5px;margin:6px 0">Right-click or long-press the image to save it.</p><textarea class="posttext" readonly rows="3">${esc(post)}</textarea><button class="btn" id="copyPost">COPY POST TEXT</button>`;
+  $('copyPost').onclick = () => { const ta = $('shareOut').querySelector('textarea'); navigator.clipboard && navigator.clipboard.writeText(post).then(() => { $('copyPost').textContent = 'COPIED'; }).catch(() => { ta.select(); }); };
+}
+let civT = 99;
+function civFrame(first) {
+  const s = S(); if (!$('hCiv')) return;
+  if (first) { tnInit(); $('gKeys').innerHTML = [['pop', 'POPULATION'], ['bld', 'BUILDINGS'], ['blocksPlaced', 'BLOCKS'], ['wealth', 'WEALTH'], ['food', 'FOOD/DAY']].map(([k, l]) => `<button class="chip ${k === gstate.key ? 'on' : ''}" data-k="${k}">${l}</button>`).join(''); $('gKeys').querySelectorAll('[data-k]').forEach(b => b.onclick = () => { gstate.key = b.dataset.k; $('gKeys').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === b)); drawGrowth(S()); }); civT = 99; }
+  if ((civT += 1) < 3 && !first) return; civT = 0;
+  $('hCiv').innerHTML = civStatsHTML(s);
+  $('hLevels').innerHTML = levelsHTML(s);
+  const reps = s.reports || [];
+  $('hDaily').innerHTML = reportHTML(reps.filter(r => r.kind === 'day').slice(-1)[0]);
+  $('hWeekly').innerHTML = weekHTML(reps.filter(r => r.kind === 'week').slice(-1)[0]);
+  $('hContrib').innerHTML = contribHTML(s); bindMinds($('hContrib'));
+  drawGrowth(s);
+  if (performance.now() - tn.nowAt > 20000) tnRender();
+}
 function renderHome(first) {
   const el = sec('home'); const s = S();
   if (first || !el.dataset.built) {
@@ -164,9 +329,10 @@ function renderHome(first) {
     el.innerHTML = `
     <section class="hero4">
       <div class="pitch">
-        <p class="kicker"><i class="dot"></i>LIVE \u00B7 <span id="hPop">120</span> MINDS \u00B7 5 VILLAGES \u00B7 ONE CLOCK</p>
-        <h1>EVERY VILLAGER <em>THINKS</em> FOR ITSELF</h1>
-        <p class="lede">A living block world. AI villagers remember, plan, farm, chop, mine and build their own villages. Not scripted NPCs: autonomous minds you can watch, inspect and influence.</p>
+        <p class="kicker"><i class="dot"></i>LIVE \u00B7 DAY <span id="hDayK">1</span> \u00B7 <span id="hPop">0</span> RESIDENTS \u00B7 <span id="hStageK"></span></p>
+        <h1>FROM A CAMP <em>TO A CITY.</em></h1>
+        <p class="sub2">BUILT BY AI.</p>
+        <p class="lede">Five camps in an empty valley. Every block of every house, street and market hall is gathered, carried and placed by AI residents who remember, plan and decide for themselves. Nothing is scripted and nothing appears by itself.</p>
         <div class="cta"><button class="btn big grass" id="goPlay">ENTER THE WORLD</button><button class="btn big plank" id="goWatch">WATCH THE VILLAGE</button></div>
         <div class="social"><a class="xlink" href="${Pages.LINKS.x}" target="_blank" rel="noopener">${XSVG}<span>Follow ${Pages.LINKS.xHandle}</span></a><span id="hLive"></span></div>
       </div>
@@ -179,7 +345,14 @@ function renderHome(first) {
       </div>
     </section>
     <div class="rest"><div class="inner">
-      <section><p class="eyebrow"><span class="live-tag">\u25A0 LIVE</span> THE WORLD RIGHT NOW</p><h2 class="sec">One shared world, counted live</h2><div class="metrics2" id="hMetrics"></div></section>
+      <section><p class="eyebrow"><span class="live-tag">\u25A0 LIVE</span> WORLD STATS</p><h2 class="sec">Everything they have built, counted</h2><p class="lede" style="margin-bottom:14px">Every number below is a count of real events in the simulation: a block placed by a builder, a crop cut by a farmer, a coin changing hands. <span id="hTodayNote"></span></p><div class="civstats" id="hCiv"></div></section>
+      <section><p class="eyebrow">SETTLEMENT LEVEL</p><h2 class="sec">Camp \u2192 Hamlet \u2192 Village \u2192 Town \u2192 City</h2><p class="lede" style="margin-bottom:14px">A settlement levels up only when it meets every requirement: people, buildings, food, wealth, streets. No timers.</p><div class="levels" id="hLevels"></div></section>
+      <section><p class="eyebrow">THEN / NOW</p><h2 class="sec">The valley on day <span id="tnThen">1</span> and today</h2>
+        <div class="tn"><div class="tnbar"><div class="chips" id="tnArea"></div><div class="chips" id="tnDays"></div></div>
+          <div class="tnview" id="tnView"><canvas id="tnA" width="208" height="208" aria-label="Aerial view, earlier day"></canvas><canvas id="tnB" width="208" height="208" aria-label="Aerial view, today"></canvas><div class="tnhandle" id="tnHandle"><span>\u25C0 \u25B6</span></div><input type="range" id="tnRange" min="0" max="100" value="50" aria-label="Compare then and now"><span class="tnlbl l" id="tnLblA">DAY 1</span><span class="tnlbl r" id="tnLblB">TODAY</span></div>
+          <div class="tnside"><div id="tnFacts"></div><button class="btn big grass" id="shareBtn">MAKE A SHARE CARD</button><div id="shareOut"></div></div></div></section>
+      <section class="reports"><div><p class="eyebrow">DAILY REPORT</p><div id="hDaily"></div></div><div><p class="eyebrow">WEEKLY REPORT</p><div id="hWeekly"></div></div><div class="chartcol"><p class="eyebrow">GROWTH <span class="chips small" id="gKeys"></span></p><div class="gchart"><canvas id="gChart"></canvas></div></div></section>
+      <section><p class="eyebrow"><span class="live-tag">\u25A0 LIVE</span> MINDS RIGHT NOW</p><div class="metrics2" id="hMetrics"></div></section>
       <section class="live3">
         <div><p class="eyebrow">WORKING RIGHT NOW <span id="hClock" style="margin-left:auto"></span></p><div id="hWork" class="workcol"></div></div>
         <div><p class="eyebrow"><span class="live-tag">\u25A0</span> WHAT THEY ARE THINKING</p><ul class="stream" id="hStream"></ul></div>
@@ -194,12 +367,13 @@ function renderHome(first) {
         </div>
       </section>
       <section><p class="eyebrow">THE WORK</p><h2 class="sec">They build, farm and mine. For real.</h2><p class="lede" style="margin-bottom:16px">Every block you see placed, tilled or dug was placed, tilled or dug by a villager. Resources are walked to, gathered, carried and stored before anything gets built. When a material runs out, builders change the plan.</p><div class="work3" id="hWork3"></div></section>
+      <section><p class="eyebrow">TOP CONTRIBUTORS</p><h2 class="sec">Who built this place</h2><div class="contrib" id="hContrib"></div></section>
       <section><p class="eyebrow">TOP MINDS <button class="btn" id="hAll" style="margin-left:auto">Full leaderboard</button></p><h2 class="sec">Sharpest minds right now</h2><div class="minds-grid" id="hTop"></div></section>
       <section><p class="eyebrow">LIVING VILLAGERS</p><h2 class="sec">Different minds, different lives</h2><div class="vill-grid" id="hVill"></div></section>
       <section><p class="eyebrow">VILLAGES <button class="btn" id="hMap" style="margin-left:auto">Map and rankings</button></p><h2 class="sec">Five places, five temperaments</h2><div class="vgrid" id="hVgrid"></div></section>
       <section><p class="eyebrow">INSPECT THE MIND</p><h2 class="sec">Click any villager and see why</h2><div class="inspect"><div id="hInspect"></div>
         <ul class="points"><li><img src="${UI.icon('hammer')}" alt=""><span><b>Current task and reason</b>Not a vague mood: "Placing blocks: walls of Ivo's cottage (54/143)" because "Ivo saved 180 coins for a cottage".</span></li><li><img src="${UI.icon('mem')}" alt=""><span><b>Memory and beliefs</b>What they remember, what they believe and whether it is actually true.</span></li><li><img src="${UI.icon('pick')}" alt=""><span><b>Skills that grow</b>Farming, building, mining, trading and more rise with practice, from 0 to 100.</span></li><li><img src="${UI.icon('belief')}" alt=""><span><b>Honest labels</b>Every decision is marked BEHAVIOR ENGINE, or AI REASONING when a language model chose it.</span></li></ul></div></section>
-      <section><p class="eyebrow">PERSISTENT WORLD</p><h2 class="sec">The world keeps going without you</h2><div class="world2"><div class="daybox" id="hDay"></div><div id="hHist"></div></div></section>
+      <section><p class="eyebrow">WORLD HISTORY</p><h2 class="sec">From the first shelter to today</h2><div class="world2"><div class="daybox" id="hDay"></div><div id="hHist"></div></div></section>
       <section class="community"><div><h2>Follow the villages grow</h2><p>New homes, new fields, elections, feuds and the occasional theft. Updates and clips from the world are posted on X.</p></div><div class="acts"><a class="btn big grass" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px" href="${Pages.LINKS.x}" target="_blank" rel="noopener">${XSVG.replace('<svg', '<svg style="width:16px;height:16px"')} ${Pages.LINKS.xHandle}</a>${Pages.LINKS.github ? `<a class="btn big plank" style="text-decoration:none" href="${Pages.LINKS.github}" target="_blank" rel="noopener">GitHub</a>` : ''}</div></section>
       ${Pages.footer()}
     </div></div>`;
@@ -226,7 +400,9 @@ function renderHome(first) {
   const L = alive();
   const awake = L.filter(a => !a.sleeping).length;
   const dpm = decPerMin();
-  $('hPop').textContent = L.length;
+  $('hPop').textContent = L.length; $('hDayK').textContent = Sim.dayOf(s.t);
+  { const tiers = {}; for (const v of W.VILLAGES) { const t = (s.villages[v.id].tier || '').toUpperCase(); tiers[t] = (tiers[t] || 0) + 1; } $('hStageK').textContent = Object.entries(tiers).map(([t, n]) => n + ' ' + t + (n > 1 ? (t === 'CITY' ? '' : 'S') : '')).join(' \u00B7 ').replace('CITYS', 'CITIES'); }
+  civFrame(first);
   $('hClock').textContent = 'DAY ' + Sim.dayOf(s.t) + ' \u00B7 ' + Sim.fmtClock(s.t);
   $('hLive').textContent = Net.shared() ? Net.online + ' watching now' : '';
   $('rThink').textContent = awake; $('rDpm').textContent = dpm; $('rMem').textContent = fmtN((s.counters || {}).memories || 0); $('rDay').textContent = Sim.dayOf(s.t);
@@ -269,8 +445,8 @@ function renderHome(first) {
     ['belief', 'CONVERSATIONS', fmtN(c.convos || 0), ''],
     ['belief', 'BELIEFS HELD', fmtN(ws.beliefs), sparkSVG(series('beliefs'), 90, 22, '#e0773a')],
     ['need', 'STRONG BONDS', fmtN(ws.relationships), sparkSVG(series('relationships'), 90, 22, '#7fb8e6')],
-    ['hammer', 'BLOCKS PLACED', fmtN(W0.blocks || 0), today('blocks') + ' today'],
-    ['wheat', 'WHEAT HARVESTED', fmtN(W0.harvested || 0), today('harvested') + ' today'],
+    ['hammer', 'BLOCKS PLACED', fmtN(Math.max(W0.blocks || 0, (s.metrics || {}).blocksPlaced || 0)), today('blocks') + ' today'],
+    ['wheat', 'CROPS HARVESTED', fmtN(Math.max(W0.harvested || 0, (s.metrics || {}).cropsHarvested || 0)), today('harvested') + ' today'],
     ['house', 'BUILDINGS', fmtN(ws.buildings), s.projects.filter(p => !p.done).length + ' underway'],
     ['coin', 'COINS IN POCKETS', fmtN(coins), ''],
   ];
@@ -306,7 +482,7 @@ function renderHome(first) {
   // persistent world
   const tiers = W.VILLAGES.map(v => [v, s.villages[v.id]]);
   $('hDay').innerHTML = `<div class="big"><small>WORLD DAY</small>${Sim.dayOf(s.t)}</div><div style="color:var(--muted);font-size:14.5px;line-height:1.5">One clock for everyone: a world day lasts 20 real minutes. Close the tab and the villages keep working; come back to what changed.</div>${tiers.map(([v, Vv]) => `<div class="tierrow"><span>${esc(v.name)}</span><span class="bar"><i style="width:${Math.min(100, Math.round((Vv.tierScore || 0) / 58 * 100))}%;background:${v.color}"></i></span><b class="mono" style="font-size:12px">${esc(Vv.tier)}</b></div>`).join('')}`;
-  const hist = s.history.filter(h => !h.minor).slice(-6).reverse();
+  const hist = s.history.filter(h => !h.minor && ['founding', 'growth', 'build', 'business', 'milestone', 'world'].includes(h.kind)).slice(-10).reverse();
   $('hHist').innerHTML = `<ul class="timeline">${hist.map(h => `<li class="major"><span class="d">DAY ${h.day} \u00B7 ${esc(String(h.kind || '').toUpperCase())}</span>${h.vid ? UI.vtag(h.vid) : ''}<div class="tx">${esc(h.text)}</div></li>`).join('')}</ul><button class="btn plank" id="hHistAll" style="margin-top:10px">Full world history</button>`;
   $('hHistAll').onclick = () => Pages.go('history');
 }
@@ -385,6 +561,7 @@ function renderMind(first) {
     <div><p class="eyebrow">MEMORIES</p><ul class="plist">${a.memories.slice(-8).reverse().map(mm => `<li><small>D${Sim.dayOf(mm.t)} ${Sim.fmtClock(mm.t)} \u00B7 importance ${(mm.imp || 0).toFixed(2)}</small><br>${esc(mm.text)}</li>`).join('') || '<li>Nothing remembered yet.</li>'}</ul></div>
     <div><p class="eyebrow">RELATIONSHIPS</p><ul class="plist">${top.friends.map(f => `<li><button class="rowbtn" data-mind="${f.id}">${esc(nm(f.id))}</button> <small>${esc(UI.vname(s.byId[f.id] && s.byId[f.id].vid))} \u00B7 trust ${Math.round(f.r[0])} \u00B7 affection ${Math.round(f.r[1])}</small>${a.summaries[f.id] ? '<br>' + esc(a.summaries[f.id]) : ''}</li>`).join('')}${top.rivals.map(f => `<li><button class="rowbtn" data-mind="${f.id}">${esc(nm(f.id))}</button> <small style="color:var(--blood)">friction \u00B7 trust ${Math.round(f.r[0])} \u00B7 resentment ${Math.round(f.r[5])}</small></li>`).join('')}</ul></div>
   </section>
+  <section><p class="eyebrow">LIFETIME CONTRIBUTION</p><div class="civstats">${contribTiles(a)}</div>${builtBy(a)}</section>
   <section class="twocol">
     <div><p class="eyebrow">SKILLS (0-100)</p><div class="skills">${skills.map(([k, v]) => `<div class="score"><span class="lbl2">${esc(k)}</span><div class="bar"><i style="width:${Math.round(v)}%"></i></div><b>${Math.round(v)}</b></div>`).join('')}</div></div>
     <div><p class="eyebrow">PROPERTY AND WORK</p><ul class="plist"><li>Money: <b class="mono">${Math.round(a.money)}</b> coins${a.debt ? ' \u00B7 owes ' + Math.round(a.debt) : ''}</li><li>Home: ${esc(Sim.placeName(a.home))}${a.renting ? ' (renting)' : ''}</li>${props.map(p => `<li>Owns ${esc(p.kind === 'house' ? (p.tier || 'a') + ' house' : p.kind)} \u00B7 value ${p.value} \u00B7 condition ${Math.round(p.condition * 100)}%${p.forSale ? ' \u00B7 for sale' : ''}</li>`).join('')}${biz.map(b => `<li>Runs <b>${esc(b.name)}</b> \u00B7 ${b.staff ? b.staff.length : 0} staff \u00B7 cash ${Math.round(b.cash || 0)}</li>`).join('')}<li>Goals: ${esc(a.goals.map(g => g.type.replace(/_/g, ' ').toLowerCase()).join(', ') || 'none')}</li></ul>${a.bio ? `<p style="color:var(--muted);font-size:14px;margin-top:10px">${esc(a.bio)}</p>` : ''}</div>
@@ -394,6 +571,24 @@ function renderMind(first) {
   $('pBack').onclick = () => Pages.go('minds');
   bindMinds(el);
   drawHistChart($('pChart'), a);
+}
+function contribTiles(a) {
+  const c = a.contrib || {}; const f = (v) => fmtK(v || 0);
+  const t = [['hammer', 'BLOCKS PLACED', c.blocksPlaced], ['house', 'BUILDINGS WORKED ON', c.buildings], ['pick', 'BLOCKS MINED', c.blocksMined], ['axe', 'LOGS CUT', c.logsCut], ['wheat', 'CROPS HARVESTED', c.cropsHarvested], ['hoe', 'FARM TILES DUG', c.farmTiles], ['log', 'LOADS CARRIED', c.hauls], ['coin', 'TOTAL EARNINGS', a.stats && a.stats.earned], ['log', 'WOOD USED', c.woodUsed], ['pick', 'STONE USED', c.stoneUsed], ['wheat', 'SEEDS PLANTED', c.seedsPlanted], ['goal', 'ROAD BLOCKS PAVED', c.roadsPaved]];
+  return t.map(([ic, k, v]) => `<div class="cstat"><span class="ic"><img src="${UI.icon(ic)}" alt=""></span><span class="k">${k}</span><b>${f(v)}</b><span class="sub"></span></div>`).join('');
+}
+function builtBy(a) {
+  const s = S(); const out = [];
+  const all = Object.assign({}, s.bmeta || {}); for (const id in s.extraPlaces) { const p = s.extraPlaces[id]; if (p.meta && !p.alias) all[id] = p.meta; }
+  for (const id in all) { const m = all[id]; const mine = (m.by || []).find(([x]) => x === a.id); if (mine) out.push([m, mine[1]]); }
+  out.sort((x, y) => y[0].day - x[0].day);
+  if (!out.length) return '';
+  return `<p class="eyebrow" style="margin-top:16px">BUILDINGS ${esc(a.name.toUpperCase())} HELPED BUILD</p><ul class="blist">${out.slice(0, 12).map(([m, n]) => `<li><b>${esc(Sim.cap(m.name || m.type))}</b> <small>day ${m.day} \u00B7 ${fmtK(n)} of ${fmtK(m.blocks)} blocks by ${esc(a.name)}</small></li>`).join('')}</ul>`;
+}
+function buildingRecords(vid) {
+  const list = AV.Civ.buildingsOf(vid).filter(b => !b.meta.founding).sort((x, y) => (y.meta.day || 0) - (x.meta.day || 0));
+  if (!list.length) return '<p class="muted">Nothing built yet beyond the first camp.</p>';
+  return `<ul class="blist">${list.slice(0, 40).map(b => { const m = b.meta || {}; const used = Object.entries(m.used || {}).filter(([, v]) => v >= 1).map(([k, v]) => Math.round(v) + ' ' + k).join(', '); return `<li><b>${esc(Sim.cap(m.name || b.name))}</b> <small>${esc(String(m.type || b.kind))}</small><br><small>Built day ${m.day || '?'}${m.started && m.started !== m.day ? ' (started day ' + m.started + ')' : ''}${(m.by || []).length ? ' \u00B7 by ' + m.by.map(([id]) => esc(nm(id))).join(' + ') : ''}${m.owner ? ' \u00B7 owner ' + esc(nm(m.owner)) : ''}${used ? ' \u00B7 ' + esc(used) : ''}${m.value ? ' \u00B7 value ' + fmtK(m.value) + ' coins' : ''}</small></li>`; }).join('')}</ul>`;
 }
 function drawHistChart(cv, a) {
   if (!cv) return;
@@ -435,15 +630,15 @@ function renderVillages(first) {
     el.dataset.built = '1';
     el.innerHTML = `<section><p class="eyebrow">VILLAGES \u00B7 WORLD MAP</p><h2 class="sec">Five settlements on one river valley</h2><p class="lede">Roads meet at the crossroads. Merchants walk them with goods, travellers carry news, migrants move when life sours. Click the map to fly there.</p></section>
     <section class="mapwrap"><div><canvas id="mapCv" width="624" height="624" aria-label="Top-down map of the world"></canvas><div class="legend2">${W.VILLAGES.map(v => `<span><i style="background:${v.color}"></i>${esc(v.name)}</span>`).join('')}<span><i style="background:#fff"></i>visitor</span></div></div>
-      <div><p class="eyebrow">RANKINGS</p><div class="lb-wrap"><table class="lb" style="min-width:0"><thead><tr><th>#</th><th>Village</th><th>Tier</th><th>Score</th><th>Pop</th><th>Wealth</th><th>Happy</th><th>Mind</th></tr></thead><tbody id="vRank"></tbody></table></div>
+      <div><p class="eyebrow">RANKINGS</p><div class="lb-wrap"><table class="lb" style="min-width:0"><thead><tr><th>#</th><th>Settlement</th><th>Stage</th><th>Level</th><th>Pop</th><th>Wealth</th><th>Happy</th><th>Mind</th></tr></thead><tbody id="vRank"></tbody></table></div>
       <p class="eyebrow" style="margin-top:22px">RELATIONS BETWEEN VILLAGES</p><div class="relbars" id="vRel"></div></div></section>
     <section><p class="eyebrow">DETAIL</p><div class="vgrid" id="vCards" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"></div></section>`;
-    mapBase = mapBase || buildMapBase();
+    mapBase = buildMapBase(); mapState.built = performance.now();
     $('mapCv').onclick = (e) => { const r = e.target.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width * W.W, z = (e.clientY - r.top) / r.height * W.D; Pages.go('world'); G().setMode('watch'); G().lookAtPoint(x, z); };
   }
   if (!first && tick !== 0) return;
-  const rows = W.VILLAGES.map(v => ({ v, st: Sim.stats(v.id), V: s.villages[v.id] })).sort((a, b) => (b.V.tierScore || 0) - (a.V.tierScore || 0));
-  $('vRank').innerHTML = rows.map((r, i) => `<tr data-v="${r.v.id}"><td class="rank">${i + 1}</td><td><span class="vtag" style="background:${r.v.color};margin:0">${esc(r.v.name.toUpperCase())}</span></td><td>${esc(r.V.tier)}</td><td>${Math.round(r.V.tierScore || 0)}</td><td>${r.st.pop}</td><td>${r.st.wealth.toLocaleString('en-US')}</td><td>${r.st.happy}</td><td>${r.st.cognition}</td></tr>`).join('');
+  const rows = W.VILLAGES.map(v => { const R = s.small && Civ() ? Civ().stageReport(v.id) : null; return { v, st: Sim.stats(v.id), V: s.villages[v.id], R, rank: R ? R.stage + R.progress : (s.villages[v.id].tierScore || 0) / 100 }; }).sort((a, b) => b.rank - a.rank);
+  $('vRank').innerHTML = rows.map((r, i) => `<tr data-v="${r.v.id}"><td class="rank">${i + 1}</td><td><span class="vtag" style="background:${r.v.color};margin:0">${esc(r.v.name.toUpperCase())}</span></td><td>${esc(r.R ? r.R.name : r.V.tier)}</td><td>${r.R ? (r.R.stage + 1) + ' \u00B7 ' + Math.round(r.R.progress * 100) + '%' : Math.round(r.V.tierScore || 0)}</td><td>${r.st.pop}</td><td>${(r.R ? r.R.wealth : r.st.wealth).toLocaleString('en-US')}</td><td>${r.st.happy}</td><td>${r.st.cognition}</td></tr>`).join('');
   const pairs = []; for (let i = 0; i < W.VILLAGES.length; i++) for (let j = i + 1; j < W.VILLAGES.length; j++) pairs.push([W.VILLAGES[i], W.VILLAGES[j], AV.Civ.villageRel(W.VILLAGES[i].id, W.VILLAGES[j].id)]);
   pairs.sort((a, b) => b[2] - a[2]);
   $('vRel').innerHTML = pairs.map(([a, b, v]) => `<div><span>${esc(a.name)} \u2194 ${esc(b.name)}</span><span class="track"><i style="${v >= 0 ? `left:50%;width:${Math.min(50, v / 2)}%;background:var(--moss)` : `right:50%;width:${Math.min(50, -v / 2)}%;background:var(--blood)`}"></i></span><b class="mono" style="text-align:right">${v > 0 ? '+' : ''}${Math.round(v)}</b></div>`).join('');
@@ -457,6 +652,7 @@ function renderVillages(first) {
       <dt>Stock</dt><dd style="white-space:normal">${Sim.GOODS.map(g => g + ' ' + Math.round(V.econ.stock[g] || 0)).join(', ')}</dd>
       <dt>Building</dt><dd style="white-space:normal">${esc(s.projects.filter(p => !p.done && p.vid === v.id).map(p => p.label + ' (' + AV.Civ.stageOf(p) + ')').join(', ') || 'nothing')}</dd>
       <dt>Paper</dt><dd>${esc(Sim.PAPERS[v.id])}</dd></dl>
+      <p class="eyebrow" style="margin:10px 0 4px">BUILDINGS</p>${buildingRecords(v.id)}
       <span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn" data-fly="${v.id}">Fly there</button><button class="btn" data-paper="${v.id}">Read the paper</button></span></span></div>`;
   }).join('');
   $('vCards').querySelectorAll('[data-fly]').forEach(b => b.onclick = () => { const v = W.VBY[b.dataset.fly]; Pages.go('world'); G().setMode('watch'); G().lookAtPoint(v.cx, v.cz); });
@@ -465,6 +661,7 @@ function renderVillages(first) {
 function mapFrame(dt) {
   const cv = $('mapCv'); if (!cv || !mapBase) return;
   mapState.t += dt; if (mapState.t < 0.25) return; mapState.t = 0;
+  if (performance.now() - (mapState.built || 0) > 30000) { mapBase = buildMapBase(); mapState.built = performance.now(); }
   const g = cv.getContext('2d'); const k = cv.width / W.W;
   g.imageSmoothingEnabled = false; g.drawImage(mapBase, 0, 0, cv.width, cv.height);
   // projects being built

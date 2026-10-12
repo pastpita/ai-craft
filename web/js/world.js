@@ -824,6 +824,95 @@ function findLot(vid, w, d) {
   reserve(lot.x, lot.z, w, d, 1);
   return lot;
 }
+// ---------- the master plan ----------
+// The generator lays out every settlement fully built. A new world then un-builds most of it: each building
+// of the plan becomes a blueprint that villagers construct block by block when their village needs it.
+// Deterministic: every viewer derives the same camp and the same blueprints from the same seed.
+const plan = {};
+function groundOf(vid) { return vid === 'ashfield' ? B.DIRT : B.GRASS; }
+function unbuildRegion(id, vid, kind, name, x0, z0, x1, z1, keepPaths, emptyTop) {
+  const blocks = [];
+  for (let y = GROUND - 1; y < H; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (!inb(x, y, z)) continue;
+    const i = idx(x, y, z), cur = data[i];
+    let empty;
+    if (y < GROUND) empty = cur === B.WATER ? B.DIRT : cur;
+    else if (y === GROUND) empty = keepPaths && cur === B.PATH ? B.PATH : (emptyTop || groundOf(vid));
+    else empty = 0;
+    if (cur === empty) continue;
+    blocks.push([x, y, z, cur]);
+    data[i] = empty;
+  }
+  // build order: foundation first, then walls course by course, roof last; within a course, sweep around the centre
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  blocks.sort((a, b) => (a[1] - b[1]) || (Math.atan2(a[2] - cz, a[0] - cx) - Math.atan2(b[2] - cz, b[0] - cx)));
+  plan[id] = { id, vid, kind, name, lot: { x: x0, z: z0, w: x1 - x0 + 1, d: z1 - z0 + 1 }, blocks };
+  return plan[id];
+}
+// keep: ids of buildings that stand on day one. Returns the plan.
+function unbuild(keep) {
+  const K = new Set(keep || []);
+  for (const k in plan) delete plan[k];
+  generating = true;
+  for (const b of buildings) {
+    if (K.has(b.id)) continue;
+    unbuildRegion(b.id, b.vid, b.kind, b.name, b.x - 1, b.z - 1, b.x + b.w, b.z + b.d, true);
+    // the doorstep path belongs to the camp
+    if (b.entry && inb(b.entry[0], GROUND, b.entry[1])) data[idx(b.entry[0], GROUND, b.entry[1])] = B.PATH;
+  }
+  // the square: paving, well, stalls and lamps come later; the camp has a trampled clearing and a fire pit
+  for (const v of VILLAGES) {
+    const id = v.id + '_square';
+    if (K.has(id)) continue;
+    const P = v.plaza, px0 = v.cx - (P >> 1), pz0 = v.cz - (P >> 1);
+    unbuildRegion(id, v.id, 'square', v.name + ' Market Square', px0 - 1, pz0 - 1, px0 + P, pz0 + P, false, B.PATH);
+    data[idx(v.cx, STAND, v.cz)] = B.COBBLE; data[idx(v.cx, STAND + 1, v.cz)] = B.TORCH;
+  }
+  generating = false;
+  torches.length = 0;
+  for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) for (let y = 0; y < H; y++) if (data[idx(x, y, z)] === B.TORCH) torches.push([x, y, z]);
+  computeLight();
+  for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) computeStandColumn(x, z);
+  // places inside planned buildings: stand on the empty lot until it is built
+  for (const id in plan) {
+    const p = places[id]; if (!p) continue;
+    const L = plan[id].lot; const spots = [];
+    for (let i = L.x + 1; i < L.x + L.w - 1; i++) for (let k = L.z + 1; k < L.z + L.d - 1; k++) if (standY[i + k * W] >= 0) spots.push([i, k]);
+    if (spots.length) p.spots = spots;
+  }
+  base = data.slice();
+  return plan;
+}
+// lots for growth beyond the plan: further out as the settlement grows, clearing trees in the way
+function findGrowthLot(vid, w, d, ring) {
+  const v = VBY[vid]; if (!v) return null;
+  for (const R of [v.r + 8, v.r + 14 + (ring || 0), v.r + 22 + (ring || 0), v.r + 30 + (ring || 0)]) {
+    let best = null, bs = 1e9;
+    for (let x = v.cx - R; x <= v.cx + R - w; x += 1) for (let z = v.cz - R; z <= v.cz + R - d; z += 1) {
+      const mx = x + w / 2, mz = z + d / 2; const dist = Math.hypot(mx - v.cx, mz - v.cz);
+      if (dist > R || dist < 6) continue;
+      if (x < 2 || z < 2 || x + w > W - 2 || z + d > D - 2) continue;
+      let ok = true;
+      for (let i = x - 1; i <= x + w && ok; i++) for (let k = z - 1; k <= z + d; k++) {
+        const o = occupied[i + k * W];
+        if (o && o !== 4) { ok = false; break; }
+        const h = heights[i + k * W]; if (h < GROUND || h > GROUND + 2) { ok = false; break; }
+        if (data[idx(i, GROUND, k)] === B.WATER || data[idx(i, GROUND, k)] === B.FARMLAND) { ok = false; break; }
+      }
+      if (!ok) continue;
+      // prefer lots near a road and near the centre
+      const s = dist + (data[idx(x + (w >> 1), GROUND, z + d + 1)] === B.PATH ? -3 : 0);
+      if (s < bs) { bs = s; best = { x, z, w, d }; }
+    }
+    if (best) {
+      reserve(best.x, best.z, w, d, 1);
+      const dx = v.cx - (best.x + w / 2), dz = v.cz - (best.z + d / 2);
+      best.door = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'E' : 'W') : (dz > 0 ? 'S' : 'N');
+      return best;
+    }
+  }
+  return null;
+}
 function topBlockColor(x, z) { const y = topSolidAny(x, z); return [y, data[idx(x, y, z)]]; }
 function topSolidAny(x, z) { for (let y = H - 1; y >= 0; y--) { const b = data[idx(x, y, z)]; if (b && b !== B.TORCH) return y; } return 0; }
 
@@ -831,7 +920,7 @@ const World = {
   W, H, D, GROUND, STAND, BLOCKS, B, data, light, standY, idx, inb, get, set, isSolid, isOpaque, onChange, edits,
   applyEdits, syncEdits, clearEdits, generate, places, buildings, torches, lots, nodes, roadCells, findPath, nearestWalkable, standAt,
   los, raycast, lightAt, placeAt, villageAt, mulberry32, building, furnish, computeLight, findLot, flatten, reserve, topBlockColor,
-  VILLAGES, VBY, CROSS, riverX, registerNode, get base() { return base; },
+  VILLAGES, VBY, CROSS, riverX, registerNode, get base() { return base; }, plan, unbuild, findGrowthLot, groundOf, occupied: () => occupied, heights: () => heights,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = World; else root.World = World;
 })(typeof window !== 'undefined' ? window : globalThis);

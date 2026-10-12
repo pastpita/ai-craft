@@ -113,6 +113,8 @@ function newAgent(def, i) {
   return a;
 }
 
+Sim.genDef = (...x) => genDef(...x);
+Sim.newAgent = (...x) => newAgent(...x);
 function genDef(vid, name, job, R, idx) {
   const r = () => R();
   const RO = AV.ROSTER[vid];
@@ -149,7 +151,7 @@ Sim.defaultWork = function (a) {
   return vp(J.place, a.vid);
 };
 
-Sim.newWorld = function (seed) {
+Sim.newWorld = function (seed, opts) {
   World.clearEdits();
   World.generate(4242);
   CTX = null;
@@ -238,6 +240,8 @@ Sim.newWorld = function (seed) {
   }
   AV.Civ.init();
   Sim.initSociety();
+  // a new world is five camps: the rest of every settlement is a plan its people still have to build
+  if (AV.Civ.found && !(opts && opts.full)) AV.Civ.found();
   if (AV.Civ.startFields) AV.Civ.startFields();
   Sim.emit({ type: 'DAY_START', text: 'World day 1 begins.', imp: 0.3, public: false });
   return S;
@@ -724,6 +728,7 @@ function decide(a) {
     else {
       const seller = Sim.chooseSeller(a, 'bread', h);
       if (seller && a.money >= seller.price) add('eat', s, { place: seller.id, reason: 'hungry, buying bread at the ' + placeName(seller.id), shop: seller.id });
+      else if (S.small && vp('storehouse', a.vid)) add('eat', s - 0.1, { place: vp('storehouse', a.vid), reason: 'hungry: camp rations from the storehouse', ration: true });
     }
   }
   // work

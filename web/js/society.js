@@ -114,6 +114,7 @@ Sim.chooseSeller = function (a, good, h) {
   for (const id in s.shops) {
     const sh = s.shops[id];
     if (sh.vid !== a.vid && sh.vid !== here) continue;
+    if (AV.Civ.isPlanned && AV.Civ.isPlanned(id)) continue; // not built yet
     const g = good === 'bread' ? (sh.sells.includes('bread') ? 'bread' : sh.sells.includes('meal') && h >= 11 ? 'meal' : null) : (sh.sells.includes(good) ? good : null);
     if (!g || !Sim.shopOpen(id, h)) continue;
     if ((sh.stock[g === 'meal' ? 'bread' : g] || 0) <= 0) continue;
@@ -136,7 +137,7 @@ function sell(a, shopId, good, qty) {
   const paid = good === 'tools' ? base : base * (1 - V.town.subsidy);
   let n = 0;
   while (n < qty && (sh.stock[key] || 0) > 0 && a.money >= paid) {
-    a.money -= paid; sh.stock[key]--; n++;
+    a.money -= paid; sh.stock[key]--; n++; if (AV.Civ.metric) AV.Civ.metric('tradeVolume', paid);
     const owner = s.byId[sh.owner]; if (owner) { owner.money += base; owner.stats.earned = (owner.stats.earned || 0) + base; }
     if (good !== 'tools') V.town.treasury -= base - paid;
     if (key === 'bread') V.econ.sold.bread++;
@@ -157,6 +158,11 @@ Sim.sell = sell;
 
 Sim.doEat = function (a, p) {
   const s = S();
+  if (p.ration) {
+    const V = s.villages[a.vid]; const E = V && V.econ;
+    if (E && (E.stock.food || 0) >= 1) { E.stock.food -= 1; const c = Math.min(a.money, 1.2); a.money -= c; V.town.treasury += c; a.needs.hunger = clamp(a.needs.hunger + 0.5, 0, 1); a.lastAte = s.t; p.until = s.t + 20; if (AV.Civ.metric) AV.Civ.metric('tradeVolume', c); return; }
+    p.until = s.t; a.lastFail = s.t; return;
+  }
   if (p.shop) {
     const sh = s.shops[p.shop];
     if (sh && sh.sells.includes('meal')) {
@@ -218,6 +224,9 @@ Sim.workTick = function (a) {
       AV.Civ.practice(a, 'investigation', 0.3);
       break;
     case 'builder': AV.Civ.buildTick(a); break;
+    case 'transporter': AV.Civ.haulTick(a); break;
+    case 'engineer': AV.Civ.roadTick(a); break;
+    case 'banker': AV.Civ.practice(a, 'trade', 0.5); a.workedToday = Sim.dayOf(s.t); break;
     case 'teacher': AV.Civ.teachTick(a); break;
     case 'doctor': AV.Civ.practice(a, 'medicine', 0.4); break;
     case 'mayor': AV.Civ.practice(a, 'politics', 0.4); break;
@@ -479,7 +488,8 @@ function evaluateCase(c, g) {
     if (r[RI.trust] < 0) sc[id] += (-r[RI.trust] / 100) * g.p.neuroticism * 0.4;
     if (s.byId[id] && s.byId[id].left) delete sc[id];
     // the guard is wary of arresting the same person again so soon
-    else if (s.byId[id] && s.byId[id].lastArrest && s.t - s.byId[id].lastArrest < 4 * DAY) sc[id] *= 0.55;
+    else if (s.byId[id] && s.byId[id].lastArrest && s.t - s.byId[id].lastArrest < 4 * DAY) delete sc[id];
+    else if (s.byId[id] && s.byId[id].wrongArrests) sc[id] *= Math.pow(0.6, s.byId[id].wrongArrests);
   }
   delete sc[g.id];
   const ranked = Object.entries(sc).sort((x, y) => y[1] - x[1]);

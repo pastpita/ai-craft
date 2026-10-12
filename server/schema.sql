@@ -30,3 +30,27 @@ create table if not exists world_events (
 );
 create index if not exists world_events_day on world_events (world_id, day);
 create index if not exists world_history_day on world_history (world_id, day);
+-- civilization metrics: one row per finished world day, and the running totals
+create table if not exists world_metrics (
+  world_id         text not null,
+  day              int not null,
+  population       int,
+  wealth           bigint,
+  buildings        int,
+  houses_built     int,
+  blocks_placed    bigint,
+  blocks_mined     bigint,
+  trees_cut        bigint,
+  crops_harvested  bigint,
+  farm_tiles       bigint,
+  trade_volume     bigint,
+  businesses       int,
+  data             jsonb,
+  created_at       timestamptz not null default now(),
+  primary key (world_id, day)
+);
+create table if not exists world_metrics_totals (
+  world_id   text primary key,
+  totals     jsonb not null,
+  updated_at timestamptz not null default now()
+);

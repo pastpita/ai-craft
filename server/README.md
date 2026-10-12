@@ -23,8 +23,14 @@ Without `DATABASE_URL` the server keeps the world in `server/world-data.json`.
 | `AV_RESET=1` | Start a brand-new world (wipes `world_docs`). |
 
 Storage: `world_docs` holds exactly the documents the published page uses (`world/meta`, `world/core`,
-`world/feed`, `world/rumors`, `agents/s*`, `edits/e*`, `history/h*`). `world_history` and `world_events`
-are append-only logs for querying. If the server stops, the next start replays the missed time
+`world/civ`, `world/feed`, `world/rumors`, `agents/s*`, `edits/e*`, `history/h*`, `snaps/d*`). `world_history`
+and `world_events` are append-only logs for querying. `world_metrics` gets one row per finished world day
+(population, wealth, buildings, houses, blocks placed and mined, trees cut, crops, farm tiles, trade volume,
+businesses, plus the full row as JSON) and `world_metrics_totals` keeps the running counters.
+A world saved before the civilization update (schema < 3) is re-founded as five camps on boot.
+
+HTTP: `GET /api/hello`, `/api/world`, `/api/history`, `/api/metrics` (totals, daily rows, latest reports),
+`/api/snaps` (aerial snapshots). If the server stops, the next start replays the missed time
 (fine simulation for the last 6 world hours, a macro-day model before that).
 
 WebSocket messages (`/ws`): server → `hello`, `docs`, `doc`, `f` (1 Hz frame), `b` (speech), `e` (events),

@@ -52,6 +52,18 @@ Net.rescue = function () {
   if (Net.transport === 'artifact') becomeFollower(); else becomeProjection();
   return true;
 };
+// aerial snapshots for Then / Now: loaded on demand, they are large
+Net.snaps = {};
+Net.loadSnaps = async function () {
+  const s = S();
+  for (const sn of (s && s._snapQueue) || []) Net.snaps[sn.d] = sn;
+  if (s && s._snaps) for (const d in s._snaps) Net.snaps[d] = s._snaps[d];
+  try {
+    if (DB) { const q = await within(DB.collection('snaps').get(), 20000, 'snaps'); for (const d of q.docs) if (d.exists) { const b = thaw(d.data()); if (b && b.d) Net.snaps[b.d] = b; } }
+    else if (Net.transport === 'server') { const r = await fetch('api/snaps', { cache: 'no-store' }); if (r.ok) { const j = await r.json(); for (const b of j.snaps || []) Net.snaps[b.d] = b; } }
+  } catch (e) { console.warn('snapshots', e && e.code); }
+  return Net.snaps;
+};
 Net.shared = () => Net.transport === 'artifact' || Net.transport === 'server';
 
 // ---------------------------------------------------------------- boot
@@ -103,7 +115,7 @@ async function bootServer(step) {
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.k === 'hello') { Net.meta = m.meta; }
-      else if (m.k === 'docs') { step('LOADING MEMORIES', 0.45); Sync.build(m.docs); editDocs = {}; for (const k in m.docs) if (k.startsWith('edits/')) editDocs[k] = m.docs[k].m || {}; gotDocs = true; step('SYNCING WORLD STATE', 0.75); resolve(); }
+      else if (m.k === 'docs') { step('LOADING MEMORIES', 0.45); Sync.build(m.docs); editDocs = {}; for (const k in m.docs) if (k.startsWith('edits/')) editDocs[k] = Sync.decodeEdits(m.docs[k]); gotDocs = true; step('SYNCING WORLD STATE', 0.75); resolve(); }
       else if (gotDocs) handleServerMsg(m);
     };
     ws.onerror = () => { if (!gotDocs) reject(new Error('server unreachable')); };
@@ -143,10 +155,13 @@ async function bootArtifact(db, room, user, step) {
   Net.canWrite = can !== false;
   step('LOADING MEMORIES', 0.15);
   let docs = await readAll();
+  // a world saved before the civilization update was fully built from the start: it is re-founded as five camps
+  const stale = docs['world/meta'] && (docs['world/meta'].schema || 0) < Sync.SCHEMA;
+  if (stale) { console.warn('re-founding a world from schema', docs['world/meta'].schema); for (const k of Object.keys(docs)) delete docs[k]; Net.refounded = true; }
   if (!docs['world/meta'] || !docs['world/core']) {
     // nobody has started a world yet
     if (Net.canWrite && await tryLease()) {
-      step('GROWING FIVE VILLAGES', 0.3);
+      step('FOUNDING FIVE CAMPS', 0.3);
       await tick();
       Sim.newWorld(Date.now() % 100000); warmUp();
       Net.meta = { schema: Sync.SCHEMA, worldId: S().worldId, clock: { epoch: Date.now(), t0: S().t }, created: Date.now(), host: TAB, seq: 0 };
@@ -157,7 +172,9 @@ async function bootArtifact(db, room, user, step) {
     } else {
       // someone else is creating it right now (or this viewer cannot write): wait for it
       step('WAITING FOR THE WORLD', 0.3);
-      for (let i = 0; i < 12 && (!docs['world/meta'] || !docs['world/core']); i++) { await sleep(1500); docs = await readAll(); }
+      const fresh = (d) => d['world/meta'] && d['world/core'] && (d['world/meta'].schema || 0) >= Sync.SCHEMA;
+      for (let i = 0; i < 12 && !fresh(docs); i++) { await sleep(1500); docs = await readAll(); }
+      if (!fresh(docs)) docs = {};
       if (!docs['world/core']) { Sim.newWorld(Date.now() % 100000); warmUp(); Net.meta = { worldId: S().worldId, clock: { epoch: Date.now(), t0: S().t } }; becomeProjection(); }
       else { Net.meta = docs['world/meta']; Sync.build(docs); await joinExisting(step); }
     }
@@ -166,7 +183,7 @@ async function bootArtifact(db, room, user, step) {
     step('REBUILDING THE WORLD', 0.35);
     await tick();
     Sync.build(docs);
-    for (const k in docs) if (k.startsWith('edits/')) editDocs[k] = docs[k].m || {};
+    for (const k in docs) if (k.startsWith('edits/')) editDocs[k] = Sync.decodeEdits(docs[k]);
     await joinExisting(step);
   }
   step('CONNECTING ' + S().agents.filter(a => !a.left).length + ' AGENTS', 0.95);
@@ -281,9 +298,11 @@ function startHostLoops() {
     let shardI = 0;
     hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); const n = Sync.shards(s); for (let k = 0; k < 2; k++) { const i = shardI++ % n; enqueue('agents/s' + i, Sync.shardDoc(s, i)); } }, 4000));
     hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); enqueue('world/core', Sync.coreDoc(s)); enqueue('world/feed', Sync.feedDoc(s)); }, 12000));
+    hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); while (s._snapQueue && s._snapQueue.length) { const sn = s._snapQueue.shift(); enqueue('snaps/d' + sn.d, { d: sn.d, w: sn.w, h: sn.h, v: sn.v, px: sn.px }); Net.snaps[sn.d] = sn; } }, 3000));
     hostTimers.push(setInterval(() => {
       if (Net.role !== 'host') return; const s = S();
-      enqueue('world/rumors', { rumors: JSON.parse(JSON.stringify(Sync.liveRumors(s), (k, v) => typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v)) });
+      enqueue('world/rumors', Sync.rumorsDoc(s));
+      enqueue('world/civ', Sync.civDoc(s));
       for (const e of Sync.editDocs()) enqueue('edits/e' + e.k, e);
       for (const p of Sync.historyPages(s)) enqueue('history/h' + p.k, p);
       Net.meta.savedAt = Date.now(); Net.meta.savedT = s.t; Net.meta.nAgents = s.agents.length; enqueue('world/meta', Object.assign({}, Net.meta));
@@ -410,7 +429,7 @@ async function resync() {
   resyncing = true;
   try {
     const docs = await readAll();
-    if (docs['world/core']) { Net.meta = docs['world/meta'] || Net.meta; editDocs = {}; for (const k in docs) if (k.startsWith('edits/')) editDocs[k] = docs[k].m || {}; Sync.build(docs); if (AV.Render && AV.Render.refreshAll) AV.Render.refreshAll(); emitLocal('resync'); }
+    if (docs['world/core']) { Net.meta = docs['world/meta'] || Net.meta; editDocs = {}; for (const k in docs) if (k.startsWith('edits/')) editDocs[k] = Sync.decodeEdits(docs[k]); Sync.build(docs); if (AV.Render && AV.Render.refreshAll) AV.Render.refreshAll(); emitLocal('resync'); }
   } catch (e) { console.warn('resync failed', e); }
   resyncing = false;
 }
@@ -451,9 +470,10 @@ function applyDoc(key, body) {
   if (key === 'world/meta') { Net.meta = Object.assign({}, Net.meta, body); return; }
   if (key === 'world/core') { Sync.applyCore(s, body); emitLocal('core'); return; }
   if (key === 'world/feed') { Sync.applyFeed(s, body); return; }
+  if (key === 'world/civ') { for (const k of Sync.CIV_KEYS) if (k in body && k !== 'plan') s[k] = body[k]; emitLocal('civ'); return; }
   if (key === 'world/rumors') { s.rumors = Object.assign(s.rumors || {}, body.rumors || {}); return; }
   if (key.startsWith('agents/')) { Sync.applyShard(s, body); return; }
-  if (key.startsWith('edits/')) { editDocs[key] = body.m || {}; const all = {}; for (const k in editDocs) Object.assign(all, editDocs[k]); World.syncEdits(all, true); return; }
+  if (key.startsWith('edits/')) { editDocs[key] = Sync.decodeEdits(body); const all = {}; for (const k in editDocs) Object.assign(all, editDocs[k]); World.syncEdits(all, true); return; }
   if (key.startsWith('history/')) { const k = body.k || 0; s.history.splice(k * Sync.HIST_PAGE, (body.items || []).length, ...(body.items || [])); emitLocal('history'); }
 }
 function subscribeDocs() {

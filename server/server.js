@@ -53,6 +53,11 @@ const Store = {
     if (!this.pool || !evs.length) return;
     for (const e of evs) await this.pool.query('insert into world_events (world_id, ev_id, day, t, type, village, actor, text, truth) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict do nothing', [worldId, e.id, e.day, e.t, e.type, e.vid || null, e.actor || null, e.text || null, e.truth || null]);
   },
+  async saveMetrics(worldId, rows, totals) {
+    if (!this.pool) return;
+    for (const r of rows) await this.pool.query('insert into world_metrics (world_id, day, population, wealth, buildings, houses_built, blocks_placed, blocks_mined, trees_cut, crops_harvested, farm_tiles, trade_volume, businesses, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) on conflict (world_id, day) do update set data = excluded.data', [worldId, r.d, r.pop, r.wealth, r.bld, r.housesBuilt, r.blocksPlaced, r.blocksMined, r.treesCut, r.cropsHarvested, r.farmTiles, Math.round(r.tradeVolume || 0), r.biz, JSON.stringify(r)]);
+    if (totals) await this.pool.query('insert into world_metrics_totals (world_id, totals, updated_at) values ($1, $2, now()) on conflict (world_id) do update set totals = excluded.totals, updated_at = now()', [worldId, JSON.stringify(totals)]);
+  },
   async wipe() { if (this.pool) await this.pool.query('delete from world_docs'); else try { fs.unlinkSync(FILE); } catch (e) { /* none */ } },
 };
 
@@ -60,12 +65,14 @@ const Store = {
 let S = null, meta = null;
 const collector = Sync.collector();
 const lastSaved = {};             // key -> JSON string written last
-let histSaved = 0, evSaved = 0;
+let histSaved = 0, evSaved = 0, metricsSaved = 0;
 
 async function boot() {
   await Store.init();
   const docs = await Store.loadAll();
-  if (docs['world/meta'] && docs['world/core'] && process.env.AV_RESET !== '1') {
+  // worlds from before the civilization update were fully built from the start: they are re-founded as camps
+  const current = docs['world/meta'] && (docs['world/meta'].schema || 0) >= Sync.SCHEMA;
+  if (docs['world/meta'] && docs['world/core'] && current && process.env.AV_RESET !== '1') {
     meta = docs['world/meta'];
     S = Sync.build(docs);
     for (const k in docs) lastSaved[k] = JSON.stringify(docs[k]);
@@ -132,11 +139,16 @@ async function persist(all) {
   const changed = {};
   for (const k in docs) { const j = JSON.stringify(docs[k]); if (all || lastSaved[k] !== j) { changed[k] = docs[k]; lastSaved[k] = j; } }
   await Store.saveDocs(changed);
+  // snapshots for Then / Now, written once each
+  const snaps = {}; while (S._snapQueue && S._snapQueue.length) { const sn = S._snapQueue.shift(); snaps['snaps/d' + sn.d] = sn; }
+  if (Object.keys(snaps).length) await Store.saveDocs(snaps);
+  const rows = (S.metricsHist || []).filter(r => r.d > metricsSaved); if (rows.length) metricsSaved = rows[rows.length - 1].d;
+  await Store.saveMetrics(meta.worldId, rows, Object.assign({ day: Sim.dayOf(S.t) }, S.metrics || {}, Civ.worldTotals ? Civ.worldTotals() : {}));
   const newHist = S.history.slice(histSaved); histSaved = S.history.length;
   const newEv = S.events.filter(e => e.id > evSaved && (e.imp || 0) >= 0.4); if (S.events.length) evSaved = S.events[S.events.length - 1].id;
   await Store.appendHistory(meta.worldId, newHist);
   await Store.appendEvents(meta.worldId, newEv);
-  for (const k in changed) if (k.startsWith('edits/') || k.startsWith('history/') || k === 'world/rumors' || k === 'world/meta') send({ k: 'doc', key: k, body: changed[k] });
+  for (const k in changed) if (k.startsWith('edits/') || k.startsWith('history/') || k === 'world/rumors' || k === 'world/meta' || k === 'world/civ') send({ k: 'doc', key: k, body: changed[k] });
 }
 
 // ---------------- optional: language-model decisions for featured residents ----------------
@@ -169,6 +181,8 @@ function startHttp() {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/api/hello') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: true, transport: 'server', worldId: meta.worldId, clock: meta.clock, day: Sim.dayOf(S.t), agents: S.agents.length })); }
     if (url.pathname === '/api/world') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ day: Sim.dayOf(S.t), time: Sim.fmtClock(S.t), world: Sim.worldStats(), villages: World.VILLAGES.map(v => Sim.stats(v.id)) })); }
+    if (url.pathname === '/api/snaps') { Store.loadAll().then(all => { const snaps = Object.keys(all).filter(k => k.startsWith('snaps/')).map(k => all[k]); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ snaps })); }).catch(() => { res.writeHead(500); res.end('{}'); }); return; }
+    if (url.pathname === '/api/metrics') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ day: Sim.dayOf(S.t), totals: Object.assign({}, S.metrics || {}, Civ.worldTotals()), daily: S.metricsHist || [], reports: (S.reports || []).slice(-14) })); }
     if (url.pathname === '/api/history') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(S.history)); }
     let p = decodeURIComponent(url.pathname); if (p === '/') p = '/index.html';
     const file = path.normalize(path.join(ROOT, p));

@@ -23,6 +23,9 @@ AV.JOBS = {
   shepherd:   { label: 'Shepherd',   place: 'pen',      hours: [[7, 12], [13, 17]], gather: ['wool'] },
   potter:     { label: 'Clay Digger', place: 'claypits', hours: [[7, 12], [13, 16]], gather: ['clay'] },
   teacher:    { label: 'Teacher',    place: 'academy',  hours: [[9, 12], [13, 16]] },
+  transporter: { label: 'Transporter', place: 'storehouse', hours: [[7, 12], [13, 17]] },
+  engineer:   { label: 'Road Builder', place: 'plaza',   hours: [[8, 12], [13, 17]] },
+  banker:     { label: 'Banker',     place: 'bank',     hours: [[9, 12], [13, 17]] },
   unemployed: { label: 'Unemployed', place: null,       hours: [] },
 };
 
@@ -279,6 +282,14 @@ AV.FEATURED = [
 ];
 
 AV.EXTRA_NAMES = ['Bram', 'Corin', 'Della', 'Edda', 'Fergus', 'Greta', 'Hale', 'Ivo', 'Jessa', 'Kit', 'Lorne', 'Maeve', 'Nils', 'Odile', 'Pell', 'Quill', 'Rhea', 'Sten', 'Tamsin', 'Ulla', 'Vance', 'Wren', 'Yara', 'Zeb', 'Agnes', 'Bertil', 'Cass', 'Dorrin', 'Elke', 'Fen', 'Gil', 'Hester', 'Ines', 'Jory', 'Kaspar', 'Liesl', 'Mott', 'Neve'];
+// newcomers who move in once a settlement has beds to offer, in the naming style of each place
+AV.NEWCOMERS = {
+  highvale: ['Agnes', 'Bertram', 'Cecily', 'Duncan', 'Eleanor', 'Felix', 'Gwendolyn', 'Hugo', 'Imogen', 'Jasper', 'Leonora', 'Matilda', 'Neville', 'Oswin', 'Philippa', 'Quentin', 'Rosalind', 'Septimus', 'Theodora', 'Ursula', 'Victor', 'Winifred', 'Alistair', 'Beatrix', 'Cornelius', 'Dorothea', 'Edmund', 'Florence', 'Godfrey', 'Harriet'],
+  ironridge: ['Alva', 'Bodil', 'Dagny', 'Egil', 'Frode', 'Gudrun', 'Halvard', 'Inge', 'Jorunn', 'Ketil', 'Leif', 'Margit', 'Njal', 'Oddny', 'Ragna', 'Sindre', 'Thyra', 'Ulf', 'Vigdis', 'Ylva', 'Asgeir', 'Brede', 'Eira', 'Geir', 'Hedda', 'Ivar', 'Kari', 'Lars', 'Maren', 'Rolf'],
+  rivergate: ['Adriana', 'Bruno', 'Carla', 'Dante', 'Emilia', 'Flavio', 'Giulia', 'Ivo', 'Lorenza', 'Massimo', 'Nicoletta', 'Orsola', 'Piero', 'Raffaella', 'Sandro', 'Tiziana', 'Ugo', 'Valeria', 'Aldo', 'Bettina', 'Cesare', 'Donata', 'Ettore', 'Fiorella', 'Gino', 'Ilaria', 'Lapo', 'Marisa', 'Nando', 'Ottavia'],
+  greenhollow: ['Acorn', 'Basil', 'Campion', 'Daisy', 'Elder', 'Fennel', 'Gorse', 'Hazelnut', 'Ivy', 'Juniperia', 'Kale', 'Lark', 'Mallow', 'Nettle', 'Oat', 'Parsley', 'Quince', 'Rush', 'Sage', 'Tansel', 'Umber', 'Vetch', 'Willow', 'Yarrowby', 'Bryony', 'Clove', 'Dewberry', 'Flax', 'Hawthorn', 'Larch'],
+  ashfield: ['Ash', 'Bones', 'Cog', 'Dregs', 'Kindle', 'Flick', 'Gravel', 'Hatch', 'Itch', 'Jolt', 'Knuckles', 'Lint', 'Mouse', 'Nails', 'Oaf', 'Pike', 'Rasp', 'Scab', 'Tinder', 'Vane', 'Wisp', 'Cinders', 'Dusk', 'Grub', 'Husk', 'Rust', 'Slate', 'Soot', 'Thorn', 'Weasel'],
+};
 AV.EXTRA_SURNAMES = ['Ashby', 'Brook', 'Carrow', 'Dunmore', 'Fallow', 'Hearth', 'Kettle', 'Marsh', 'Penny', 'Thorne', 'Wick', 'Yarrow'];
 AV.EXTRA_JOBS = ['farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer', 'farmer',
   'miner', 'miner', 'miner', 'miner', 'miner', 'miner', 'miner', 'miner',

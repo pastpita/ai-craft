@@ -149,7 +149,8 @@ UI.renderStats = function () {
   const p = G().viewPos(); const inside = W.villageAt(p.x, p.z, 8) === vid;
   const wx = V.flags.drought > 0 ? 'drought' : s.weather.kind;
   $('cWx').innerHTML = wxIcon(wx) + esc(wx.toUpperCase());
-  $('where').innerHTML = (inside ? 'In ' : 'Near ') + '<b>' + esc(V.name) + '</b> \u00B7 ' + esc(V.tier) + ' \u00B7 tech ' + V.tech;
+  const lvl = s.small && AV.Civ.stageReport ? AV.Civ.stageReport(vid) : null;
+  $('where').innerHTML = (inside ? 'In ' : 'Near ') + '<b>' + esc(V.name) + '</b> \u00B7 ' + esc(V.tier) + (lvl ? ' \u00B7 level ' + (lvl.stage + 1) + (lvl.next ? ' \u00B7 ' + Math.round(lvl.progress * 100) + '% to ' + esc(lvl.next.toLowerCase()) : '') : ' \u00B7 tech ' + V.tech);
   const h = V.econ.hist; const prev = h[h.length - 1];
   const ch = prev ? (st.bread - prev.bread) / prev.bread : 0;
   const poll = Object.entries(st.poll).sort((a, b) => b[1] - a[1]);

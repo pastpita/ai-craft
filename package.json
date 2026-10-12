@@ -1,7 +1,7 @@
 {
   "name": "ai-craft",
-  "version": "3.0.0",
-  "description": "A living block world where every villager has a mind: 120 autonomous villagers who remember, farm, build, trade and vote on one shared clock.",
+  "version": "4.0.0",
+  "description": "A living block world where AI villagers who remember, farm, build, trade and vote grow five camps into towns and cities on one shared clock.",
   "license": "MIT",
   "private": true,
   "scripts": {

@@ -9,10 +9,10 @@ const Sync = AV.Sync = {};
 const Sim = () => AV.Sim;
 
 Sync.RATE = 1.2;                 // world minutes per real second: one world day = 20 real minutes
-Sync.SHARD = 8;                  // residents per agents/ doc
-Sync.EDIT_DOCS = 4;
+Sync.SHARD = 6;                  // residents per agents/ doc
+Sync.EDIT_DOCS = 16;
 Sync.HIST_PAGE = 400;
-Sync.SCHEMA = 2;
+Sync.SCHEMA = 3;
 
 const R2 = (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v);
 const clone = (o) => JSON.parse(JSON.stringify(o, R2));
@@ -27,15 +27,16 @@ const AGENT_DROP = { path: 1, convo: 1, bubble: 1, _vx: 1, _vz: 1, _tx: 1, _tz: 
 function packAgent(a) {
   const o = {};
   for (const k in a) if (!AGENT_DROP[k]) o[k] = a[k];
-  const cap = Math.min(70, (a.mind && a.mind.capacity) || 60);
+  const cap = Math.min(50, (a.mind && a.mind.capacity) || 50);
   if (a.memories.length > cap) {
     // keep the most important and the most recent
     const recent = a.memories.slice(-Math.floor(cap / 2));
     const rest = a.memories.slice(0, -Math.floor(cap / 2)).sort((x, y) => (y.imp || 0) - (x.imp || 0)).slice(0, cap - recent.length).sort((x, y) => x.t - y.t);
     o.memories = rest.concat(recent);
   }
-  o.decisions = (a.decisions || []).slice(0, 8);
-  o.scoreHist = (a.scoreHist || []).slice(-30);
+  if (a.rel) { const r = {}; for (const id in a.rel) { const v = a.rel[id]; if (v && v.some(x => Math.abs(x) >= 1)) r[id] = v; } o.rel = r; }
+  o.decisions = (a.decisions || []).slice(0, 6);
+  o.scoreHist = (a.scoreHist || []).slice(-24);
   return o;
 }
 function shardsOf(s) { return Math.ceil(s.agents.length / Sync.SHARD); }
@@ -46,6 +47,15 @@ Sync.shardDoc = function (s, k) {
   while (Sync.bytes(body) > 220 * 1024) { for (const a of body.agents) a.memories = a.memories.slice(Math.floor(a.memories.length * 0.2)); }
   return body;
 };
+// the rumour graph, newest hops first, trimmed to fit one document
+Sync.rumorsDoc = function (s) {
+  const live = Sync.liveRumors(s);
+  const ids = Object.keys(live).sort((a, b) => lastHop(live[b]) - lastHop(live[a]));
+  const out = {}; let size = 20;
+  for (const id of ids) { const r = live[id]; if (r.hops.length > 12) r.hops = r.hops.slice(-12); const j = JSON.stringify(r, R2).length; if (size + j > 200 * 1024) break; out[id] = r; size += j + id.length + 4; }
+  return clone({ rumors: out });
+};
+function lastHop(r) { const h = r.hops && r.hops[r.hops.length - 1]; return h ? h.t : (r.origin && r.origin.t) || 0; }
 Sync.liveRumors = function (s) {
   const live = new Set();
   for (const a of s.agents) for (const b of a.beliefs) if (b.chain) live.add(b.chain);
@@ -59,16 +69,43 @@ Sync.coreDoc = function (s) {
   const villages = {};
   for (const vid in s.villages) {
     const v = s.villages[vid];
-    villages[vid] = Object.assign({}, v, { econ: Object.assign({}, v.econ, { hist: v.econ.hist.slice(-40), wilted: (v.econ.wilted || []).slice(-10) }), roadQueue: (v.roadQueue || []).slice(0, 400) });
+    villages[vid] = Object.assign({}, v, { econ: Object.assign({}, v.econ, { hist: v.econ.hist.slice(-24).map(round2), wilted: (v.econ.wilted || []).slice(-10) }), roadQueue: (v.roadQueue || []).slice(0, 160),
+      town: v.town ? Object.assign({}, v.town, { policyLog: (v.town.policyLog || []).slice(-12) }) : v.town });
   }
-  const projects = s.projects.filter(p => !p.done || s.t - (p.finished || 0) < 3 * 1440).map(p => p.done ? Object.assign({}, p, { blocks: [] }) : p);
+  // blueprints: a planned building's blocks come from the master plan; others are packed as text
+  const projects = s.projects.filter(p => !p.done || s.t - (p.finished || 0) < 3 * 1440).map(p => p.done ? Object.assign({}, p, { blocks: [] }) : p.plan ? Object.assign({}, p, { blocks: [], packed: 'plan' }) : Object.assign({}, p, { blocks: Sync.packBlocks(p.blocks), packed: 'text' }));
   const heat = { social: trimHeat(s.heat.social), crime: trimHeat(s.heat.crime) };
   return clone({
     v: s.v, worldId: s.worldId, t: s.t, nextId: s.nextId, players: s.players, crimes: s.crimes.slice(-60), cases: s.cases.slice(-40),
-    projects, secrets: s.secrets, farms: s.farms || {}, fields: s.fields || [], shops: s.shops, villages, extraPlaces: s.extraPlaces, properties: s.properties, businesses: s.businesses,
+    projects, secrets: s.secrets, farms: s.farms || {}, fields: s.fields || [], shops: s.shops, villages, extraPlaces: packPlaces(s.extraPlaces), properties: s.properties, businesses: s.businesses,
     loans: s.loans.slice(-80), nodes: s.nodes, relations: s.relations, counters: s.counters, weather: s.weather, heat, statsHist: (s.statsHist || []).slice(-40),
     nAgents: s.agents.length,
   });
+};
+// finished buildings: their standing spots are recomputed from the lot on load
+function packPlaces(ep) {
+  const o = {};
+  for (const id in ep) {
+    const p = ep[id];
+    // a finished building's record lives in the civ document (bmeta); only its standing spots are recomputed
+    if (p.w && p.built) o[id] = Object.assign({}, p, { spots: undefined, meta: undefined });
+    else if (p.spots && p.spots.length > 8) o[id] = Object.assign({}, p, { spots: undefined, sp: p.spots.map(q => q[0].toString(36) + '.' + q[1].toString(36)).join(',') });
+    else o[id] = p;
+  }
+  return o;
+}
+// economy history rows: two decimals are plenty for a chart
+function round2(r) { const o = {}; for (const k in r) { const v = r[k]; o[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v && typeof v === 'object' ? round2(v) : v; } return o; }
+Sync.unpackPlaces = function (s) {
+  for (const id in s.extraPlaces || {}) {
+    const p = s.extraPlaces[id];
+    if (!p.meta && s.bmeta && s.bmeta[id]) p.meta = s.bmeta[id];
+    if (p.sp) { p.spots = p.sp.split(',').map(t => t.split('.').map(n => parseInt(n, 36))); delete p.sp; }
+    if (p.spots && p.spots.length) continue;
+    const spots = [];
+    for (let i = p.x + 1; i < p.x + p.w - 1; i++) for (let k = p.z + 1; k < p.z + p.d - 1; k++) if (World.standY[i + k * World.W] >= 0) spots.push([i, k]);
+    p.spots = spots.length ? spots : [p.entry];
+  }
 };
 function trimHeat(h) { const e = Object.entries(h || {}).sort((a, b) => b[1] - a[1]).slice(0, 600); const o = {}; for (const [k, v] of e) o[k] = v; return o; }
 Sync.feedDoc = function (s) {
@@ -77,11 +114,59 @@ Sync.feedDoc = function (s) {
     convoLog: (s.convoLog || []).slice(0, 16), llmLog: (s.llmLog || []).slice(-6).map(l => Object.assign({}, l, { prompt: String(l.prompt || '').slice(0, 1500), raw: String(l.raw || '').slice(0, 800) })),
   });
 };
+// block edits, packed: sorted cell indexes as base-36 deltas with the block id ("d.b,d.b,..."), 16 documents
 Sync.editDocs = function () {
-  const parts = []; for (let i = 0; i < Sync.EDIT_DOCS; i++) parts.push({});
-  for (const k in World.edits) parts[(+k) % Sync.EDIT_DOCS][k] = World.edits[k];
-  return parts.map((m, i) => ({ k: i, m }));
+  const parts = []; for (let i = 0; i < Sync.EDIT_DOCS; i++) parts.push([]);
+  for (const k in World.edits) parts[(+k) % Sync.EDIT_DOCS].push(+k);
+  return parts.map((ix, i) => {
+    ix.sort((a, b) => a - b); let prev = 0; const out = [];
+    for (const k of ix) { out.push((k - prev).toString(36) + '.' + World.edits[k].toString(36)); prev = k; }
+    return { k: i, p: out.join(',') };
+  });
 };
+Sync.decodeEdits = function (body) {
+  if (!body) return {};
+  if (body.m) return body.m;
+  const out = {}; if (!body.p) return out;
+  let k = 0;
+  for (const part of body.p.split(',')) { const j = part.indexOf('.'); if (j < 0) continue; k += parseInt(part.slice(0, j), 36); out[k] = parseInt(part.slice(j + 1), 36); }
+  return out;
+};
+Sync.packBlocks = (list) => list.map(b => b[0].toString(36) + '.' + b[1].toString(36) + '.' + b[2].toString(36) + '.' + b[3].toString(36)).join(',');
+Sync.unpackBlocks = (str) => !str ? [] : str.split(',').map(t => t.split('.').map(n => parseInt(n, 36)));
+Sync.hydrateProjects = function (s) {
+  for (const p of s.projects || []) {
+    if (p.packed === 'plan') { const P = World.plan[p.plan]; const sw = p.swap || {}; p.blocks = P ? P.blocks.map(b => (sw[b[3]] !== undefined ? [b[0], b[1], b[2], sw[b[3]]] : b)) : []; }
+    else if (p.packed === 'text' || typeof p.blocks === 'string') p.blocks = Sync.unpackBlocks(p.blocks);
+    delete p.packed;
+  }
+};
+// the growth record: kept out of world/core so core stays small
+const CIV_KEYS = ['small', 'plan', 'planDone', 'metrics', 'metricsHist', 'reports', 'milestones', 'snapDays', 'cleared', 'bmeta'];
+Sync.CIV_KEYS = CIV_KEYS;
+Sync.civDoc = function (s) {
+  const o = {}; for (const k of CIV_KEYS) if (s[k] !== undefined) o[k] = s[k];
+  if (o.metricsHist) o.metricsHist = AV.Civ && AV.Civ.thinHist ? AV.Civ.thinHist(o.metricsHist) : o.metricsHist.slice(-300);
+  if (o.reports) o.reports = o.reports.slice(-40);
+  return clone(o);
+};
+// aerial snapshot of the valley: one byte per column, the top block's class (high nibble) and its height (low nibble)
+const SNAP_CLASS = (() => {
+  const B = World.B, c = new Uint8Array(64).fill(15);
+  const set = (k, ...ids) => ids.forEach(i => { if (i !== undefined) c[i] = k; });
+  set(0, 0); set(1, B.GRASS); set(2, B.DIRT, B.FARMLAND); set(3, B.STONE, B.COBBLE, B.ORE, B.COAL_ORE, B.GOLD_ORE); set(4, B.WATER); set(5, B.SAND, B.CLAY);
+  set(6, B.LOG); set(7, B.LEAVES); set(8, B.PLANKS, B.DOOR, B.FENCE, B.SHELF); set(9, B.PATH); set(10, B.BRICK, B.ROOF_TILE, B.OVEN);
+  set(11, B.SLATE, B.STONE_BRICK); set(12, B.PLASTER, B.CLOTH, B.WOOL); set(13, B.THATCH, B.CROP, B.SPROUT); set(14, B.TORCH, B.GLASS);
+  return c;
+})();
+Sync.snapshot = function (day) {
+  const W = World.W, D = World.D; const px = new Uint8Array(W * D);
+  for (let z = 0; z < D; z++) for (let x = 0; x < W; x++) { const [y, b] = World.topBlockColor(x, z); px[x + z * W] = (SNAP_CLASS[b] << 4) | Math.max(0, Math.min(15, y - (World.GROUND - 3))); }
+  let str = ''; for (let i = 0; i < px.length; i += 0x8000) str += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
+  return { d: day, w: W, h: D, v: 2, px: typeof btoa === 'function' ? btoa(str) : Buffer.from(str, 'binary').toString('base64') };
+};
+Sync.SNAP_DAYS = [1, 2, 3, 5, 7, 10, 14, 20, 30, 45, 60, 90, 120];
+Sync.isSnapDay = (d) => Sync.SNAP_DAYS.includes(d) || (d > 120 && d % 30 === 0);
 Sync.historyPages = function (s) {
   const pages = [];
   for (let i = 0; i * Sync.HIST_PAGE < s.history.length; i++) pages.push({ k: i, items: s.history.slice(i * Sync.HIST_PAGE, (i + 1) * Sync.HIST_PAGE) });
@@ -93,7 +178,8 @@ Sync.allDocs = function (s, meta) {
   docs['world/meta'] = meta;
   docs['world/core'] = Sync.coreDoc(s);
   docs['world/feed'] = Sync.feedDoc(s);
-  docs['world/rumors'] = { rumors: clone(Sync.liveRumors(s)) };
+  docs['world/rumors'] = Sync.rumorsDoc(s);
+  docs['world/civ'] = Sync.civDoc(s);
   for (let k = 0; k < shardsOf(s); k++) docs['agents/s' + k] = Sync.shardDoc(s, k);
   for (const e of Sync.editDocs()) docs['edits/e' + e.k] = e;
   for (const p of Sync.historyPages(s)) docs['history/h' + p.k] = p;
@@ -110,7 +196,10 @@ Sync.build = function (docs, opts) {
   const core = docs['world/core'], feed = docs['world/feed'] || {}, rum = docs['world/rumors'] || {};
   if (!core) return null;
   World.clearEdits(); World.generate(4242);
-  const edits = {}; for (const key in docs) if (key.startsWith('edits/')) Object.assign(edits, docs[key].m || {});
+  const civ = docs['world/civ'] || {};
+  // a world that started as camps: un-build the master plan first, then lay the saved edits on top
+  if (civ.plan && AV.Civ && AV.Civ.replayPlan) AV.Civ.replayPlan(civ);
+  const edits = {}; for (const key in docs) if (key.startsWith('edits/')) Object.assign(edits, Sync.decodeEdits(docs[key]));
   World.applyEdits(edits);
   const agents = [];
   const keys = Object.keys(docs).filter(k => k.startsWith('agents/')).sort((a, b) => +a.slice(8) - +b.slice(8));
@@ -119,16 +208,19 @@ Sync.build = function (docs, opts) {
     agents, byId: {}, events: feed.events || [], feed: feed.feed || [], mindFeed: feed.mindFeed || [], news: feed.news || [], convoLog: feed.convoLog || [], llmLog: feed.llmLog || [],
     rumors: rum.rumors || {}, convos: {}, away: [], econ: null, town: null, election: null, flags: null,
     history: [],
-  });
+  }, civ);
   const pages = Object.keys(docs).filter(k => k.startsWith('history/')).sort((a, b) => +a.slice(9) - +b.slice(9));
   for (const k of pages) s.history.push(...(docs[k].items || []));
   for (const a of agents) { s.byId[a.id] = a; a.path = null; a.convo = null; a.memories = a.memories || []; a.beliefs = a.beliefs || []; }
+  Sync.hydrateProjects(s);
+  Sync.unpackPlaces(s);
   // lots used by projects and finished buildings are no longer free
   for (const p of s.projects) reserveLot(p.vid, p.lot);
   for (const id in s.extraPlaces) { const pl = s.extraPlaces[id]; if (pl.w) reserveLot(pl.vid, { x: pl.x, z: pl.z, w: pl.w, d: pl.d }); }
   Sim()._setState(s);
   if (AV.Civ && AV.Civ.rebuildFields) AV.Civ.rebuildFields();
   if (AV.Civ && AV.Civ.upgradeSave) AV.Civ.upgradeSave(s);
+  if (AV.Civ && AV.Civ.applyCleared) AV.Civ.applyCleared();
   if (AV.Civ && AV.Civ.syncAllNodes) AV.Civ.syncAllNodes();
   for (const a of agents) { if (a.plan && !a.plan.arrived) a.thinkAt = Math.min(a.thinkAt || s.t, s.t + 2); }
   return s;
@@ -153,6 +245,8 @@ Sync.applyShard = function (s, body) {
 Sync.applyCore = function (s, core) {
   const keep = { t: s.t };
   for (const k in core) if (k !== 'nAgents') s[k] = core[k];
+  Sync.hydrateProjects(s);
+  Sync.unpackPlaces(s);
   if (keep.t > s.t) s.t = keep.t;
   for (const p of s.projects) reserveLot(p.vid, p.lot);
   Sim()._setState(s);

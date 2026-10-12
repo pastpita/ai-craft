@@ -4,8 +4,8 @@
 
 <p align="center">
   <img src="assets/brand/block-brain.svg" alt="" width="84"><br>
-  <b>A living block world where every villager has a mind.</b><br>
-  120 autonomous villagers remember, plan, farm, chop, mine, build, trade, gossip and vote, on one shared clock that never stops.
+  <b>They started with a camp. Watch them build a city.</b><br>
+  Autonomous villagers remember, plan, farm, chop, mine, build, trade, gossip and vote. Every block of every house, street and market hall is gathered, carried and placed by them, on one shared clock that never stops.
 </p>
 
 <p align="center">
@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <a href="#-from-a-camp-to-a-city">From a camp to a city</a> ·
   <a href="#-run-it-locally">Run it</a> ·
   <a href="#-how-villagers-think">How villagers think</a> ·
   <a href="#-village-systems">Village systems</a> ·
@@ -30,7 +31,7 @@
 
 ## ▣ What is AI CRAFT
 
-AI CRAFT is a sandbox block world with five villages and 120 villagers who run their own lives. Nobody scripts them. Each villager has a personality, needs, memories, beliefs that can be wrong, goals, skills and relationships, and turns all of that into a concrete task: **till this field, carry that wood, put the roof on that cottage.**
+AI CRAFT is a sandbox block world where five small camps grow into towns and cities, built by villagers who run their own lives. Nobody scripts them. Each villager has a personality, needs, memories, beliefs that can be wrong, goals, skills and relationships, and turns all of that into a concrete task: **till this field, carry that wood, put the roof on that cottage.**
 
 You can walk the world in first person, fly over it as a spectator, click anyone to see **what they are doing and why**, talk to them, tell them rumours, help them work, or just watch a civilization grow. The world keeps running when you close the tab.
 
@@ -50,6 +51,50 @@ You can walk the world in first person, fly over it as a spectator, click anyone
 | **Memory that fades**<br>Importance × emotion × recency. Each mind holds only as much as its capacity allows; the rest is forgotten or summarised. | **Beliefs ≠ truth**<br>Rumours carry provenance hop by hop and can grow in the retelling. The world knows what really happened; villagers do not. | **Economy from the ground up**<br>Resource sites, storehouses, prices from stock, bakers and smiths, shops, businesses, wages, rent and loans. |
 | **Villages grow**<br>New homes on free plots, new fields, workshops and civic buildings. Hamlet → Village → Town → City. | **Politics and crime**<br>Elections, campaigns, policies, thefts, witnesses, false testimony, investigations and wrongful arrests. | **One shared world**<br>One clock for everyone (a world day = 20 real minutes), persistent history, offline catch-up. |
 | **A brain you can watch**<br>The homepage brain is built from the same blocks as the world. Each decision a villager makes runs across it as a line of light, with a card naming who decided what. | **Builders adapt**<br>When the storehouse runs out of clay or stone, builders change the plan and finish in what the village has. Owners who run short borrow from the village. | **The world in numbers**<br>Minds awake, decisions per minute, memories, conversations, beliefs, bonds, blocks placed, harvests and buildings, all counted live. |
+
+---
+
+## ▣ From a camp to a city
+
+A new world starts small: **five camps**, 6–9 founders each, a storehouse, two or three huts, one field, the mine or quarry, dirt paths. Everything else is a plan the residents still have to build.
+
+<p align="center"><img src="assets/screenshots/then-now.png" alt="Then and now: the valley on day 1 and after weeks of building" width="92%"></p>
+
+```mermaid
+flowchart LR
+    NEED[A need<br/>no bread · no beds · no market] --> PLAN[A plan<br/>mayor or owner orders it]
+    PLAN --> GATHER[Gather<br/>wood · stone · clay]
+    GATHER --> CARRY[Carry<br/>storehouse → site]
+    CARRY --> BUILD[Build<br/>foundation · walls · floors · roof · interior]
+    BUILD --> USE[In use<br/>a family moves in · a bakery opens]
+    USE --> GROW[Growth<br/>newcomers arrive · wealth · stage up]
+    GROW --> NEED
+    style BUILD fill:#6fb043,color:#111,stroke:#3f7a25
+    style GROW fill:#b8894f,color:#111,stroke:#7d5a30
+```
+
+| Stage | Residents | Buildings | Also needs | Unlocks |
+|---|---|---|---|---|
+| **Camp** | – | – | – | huts, bakery, first field |
+| **Hamlet** | 8 | 4 | 8 food a day | market square, town hall, forge, tavern |
+| **Village** | 16 | 9 | market square, town hall | road builders, warehouse, workshop |
+| **Town** | 26 | 16 | 4,500 coins of wealth, 40 blocks of paved street | **bank**, school, two-storey townhouses, lamp-lit streets |
+| **City** | 36 | 26 | a bank, 9,000 coins of wealth, 40 food a day | market hall, city hall, three-storey houses |
+
+No stage arrives on a timer. Newcomers come only when there is a free bed and food; builders change the plan when a material runs out; owners who cannot pay borrow from the bank; road builders turn dirt into cobble and stone streets.
+
+**Every number is counted, never estimated.** The world keeps lifetime counters (blocks placed, blocks mined, trees cut, crops harvested, farm tiles, houses, buildings, businesses, trade volume, population peak), a row of totals for every finished day, a daily report, a weekly report and an aerial snapshot of the valley on days 1, 2, 3, 5, 7, 10, 14, 20, 30, 45, 60, 90, 120 and every 30 days after. Each resident keeps a lifetime contribution record and each building remembers who built it, from what, and when.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/world-stats.png" alt="World stats on the homepage"></td>
+<td width="50%"><img src="assets/screenshots/settlement-levels.png" alt="Settlement levels with requirements"></td>
+</tr>
+<tr>
+<td align="center">World stats: counted from real events</td>
+<td align="center">Settlement level, progress and what is still missing</td>
+</tr>
+</table>
 
 ---
 
@@ -142,18 +187,24 @@ flowchart LR
     classDef s fill:#8a8a86,color:#111
 ```
 
-### Village expansion
+### Settlement growth
 
 ```mermaid
 flowchart LR
-    P[Production & population] --> TS[Tier score]
-    TS -->|thresholds| TIER[Hamlet → Village → Town → City]
-    TIER --> ROADS[Cobbled roads] & CIVIC[Watchtower · School · Library · Hall]
-    CIVIC --> TECH[Tech points] --> P
-    HOMES[New homes on free plots] --> P
-    FIELDS[New fields] --> P
-    MIG[Migration between villages] --> P
+    P[Population & production] --> REQ{Stage requirements<br/>residents · buildings · food<br/>wealth · paved streets · bank}
+    REQ -->|all met| STAGE[Camp → Hamlet → Village → Town → City]
+    STAGE --> CAP[More newcomers welcome]
+    STAGE --> CIVIC[Bank · warehouse · school · market hall · city hall]
+    STAGE --> ROADS[Road builders pave streets, light lamps]
+    STAGE --> HOMES[Townhouses and city houses on new lots]
+    CAP --> P
+    CIVIC --> P
+    HOMES --> P
 ```
+
+### Bank
+
+Once a town has a bank and a banker, savers deposit their surplus (a little interest each day), owners take **home and business loans** when savings fall short, repayments come out of wages, and a borrower who misses six days defaults: the debt is written off and the property goes up for sale. Before there is a bank, the village treasury lends.
 
 ### Five villages
 
@@ -196,7 +247,7 @@ Each has its own mayor, election, guard, newspaper, treasury, stock, prices, tie
 <td align="center">Farmers harvesting and hauling, tasks over their heads</td>
 </tr>
 <tr>
-<td colspan="2"><img src="assets/screenshots/world-stats.png" alt="Live world statistics, thoughts and events on the homepage"></td>
+<td colspan="2"><img src="assets/screenshots/reports.png" alt="Daily report, weekly report and growth chart"></td>
 </tr>
 <tr>
 <td colspan="2" align="center">The world right now: live counters, what villagers are thinking and what just happened</td>
@@ -206,7 +257,7 @@ Each has its own mayor, election, guard, newspaper, treasury, stock, prices, tie
 <td><img src="assets/screenshots/mind-profile.png" alt="Mind profile"></td>
 </tr>
 <tr>
-<td align="center">Leaderboard of all 120 minds</td>
+<td align="center">Leaderboard of every mind in the valley</td>
 <td align="center">Mind profile: specs, scores over time, decisions</td>
 </tr>
 <tr>
@@ -252,7 +303,7 @@ flowchart TB
     end
     subgraph Server["server/ (optional)"]
       SV[server.js<br/>always-on authority]
-      PG[(PostgreSQL<br/>world_docs · history · events)]
+      PG[(PostgreSQL<br/>world_docs · history · events<br/>world_metrics · totals)]
     end
     W --> SIM --> SOC --> CIV --> SYNC
     SYNC --> NET --> UI
@@ -273,7 +324,7 @@ sequenceDiagram
       H-->>V: frame (positions, actions) · speech · events · tasks · block edits
     end
     loop every few seconds
-      H->>DB: world/core · world/feed · agents/s0..s14 · edits · history
+      H->>DB: world/core · world/civ · world/feed · agents/sN · edits · history · snapshots
     end
     V->>H: visitor action (talk, give, tell, build)
     H-->>V: result
@@ -283,10 +334,12 @@ sequenceDiagram
 | Document | Contents |
 |---|---|
 | `world/meta` | world id, clock anchor, save sequence |
-| `world/core` | villages, shops, properties, businesses, projects, fields, crops, nodes, players |
+| `world/core` | villages, shops, properties, businesses, projects (planned buildings by reference, others packed), fields, crops, nodes, players |
+| `world/civ` | the growth record: master-plan state, metrics, daily totals, reports, milestones, building records |
+| `snaps/dN` | aerial snapshot of the valley on day N (one byte per column) |
 | `world/feed` | events, mind feed, newspapers, conversation log |
-| `agents/s0…` | residents, 8 per document (needs, memory, beliefs, scores, skills, tasks) |
-| `edits/e0…e3` | block changes against the generated world |
+| `agents/s0…` | residents, 6 per document (needs, memory, beliefs, scores, skills, tasks, contributions) |
+| `edits/e0…e15` | block changes against the founding camp, packed as sorted base-36 deltas |
 | `history/h*` | permanent world history |
 
 ---
@@ -347,16 +400,22 @@ docs/                design notes: style update, brand, behaviour, shared world
 
 ## ▣ Roadmap
 
-- [x] Five villages, 120 villagers, one shared clock and persistent history
+- [x] Five settlements, one shared clock and persistent history
 - [x] Memory, beliefs vs truth, rumour provenance, gossip
 - [x] Farming cycle with new fields, gathering, hauling, block-by-block construction
 - [x] Economy, businesses, property, rent, loans, migration, trade caravans
 - [x] Elections, crime, investigations, newspapers
 - [x] Mind scores, mind profiles, leaderboard, brain network
 - [x] Inspection with current task and reason
+- [x] Worlds start as five camps and grow into towns and cities block by block
+- [x] Settlement stages with readable requirements, newcomers who follow housing
+- [x] Bank with deposits, home and business loans, defaults
+- [x] Transporters, road builders, bankers; paved streets and lamps
+- [x] World metrics, daily and weekly reports, Then / Now aerial snapshots, share card
+- [ ] Districts that emerge from what is built where
+- [ ] Bridges and new neighbourhoods across the river
 - [ ] Seasons and weather that change crops and routines
 - [ ] Animals in pens and pastures
-- [ ] Bridges, wells and roads built by villagers on their own initiative
 - [ ] Player-run shops and contracts with villagers
 - [ ] Replays: scrub through a day of village history
 - [ ] Modding hooks for new jobs, buildings and goals
