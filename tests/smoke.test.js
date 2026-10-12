@@ -27,7 +27,9 @@ for (const a of S.agents) for (const k of ['cognition', 'memory', 'socialIQ']) a
 const docs = Sync.allDocs(S, { worldId: S.worldId });
 for (const k in docs) assert.ok(Sync.bytes(docs[k]) < 240 * 1024, k + ' fits in one document');
 const t = S.t, n = S.agents.length;
-const S2 = Sync.build(JSON.parse(JSON.stringify(docs)));
+// the store delivers frozen documents
+const freeze = (o) => { if (o && typeof o === 'object') { Object.freeze(o); for (const k of Object.keys(o)) freeze(o[k]); } return o; };
+const S2 = Sync.build(freeze(JSON.parse(JSON.stringify(docs))));
 assert.strictEqual(S2.t, t); assert.strictEqual(S2.agents.length, n);
 for (let i = 0; i < 120; i++) Sim.advance(1);
 

@@ -14,6 +14,8 @@ const S = () => Sim.S();
 
 const LEASE_MS = 20000, RENEW_MS = 6000;
 // a store call that never answers must not freeze the world
+// the store hands out frozen snapshots; the simulation needs its own copies
+const thaw = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
 const within = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: 'timeout', message: what + ' timed out' }), ms))]);
 const TAB = 't' + Math.random().toString(36).slice(2, 10);
 const pref = {
@@ -207,7 +209,7 @@ const tick = () => new Promise(r => setTimeout(r, 16));
 async function readAll() {
   const out = {};
   for (const c of ['world', 'agents', 'edits', 'history']) {
-    try { const q = await within(DB.collection(c).get(), 20000, 'read ' + c); for (const d of q.docs) if (d.exists) out[c + '/' + d.id] = d.data(); } catch (e) { console.warn('read', c, e && e.code); }
+    try { const q = await within(DB.collection(c).get(), 20000, 'read ' + c); for (const d of q.docs) if (d.exists) out[c + '/' + d.id] = thaw(d.data()); } catch (e) { console.warn('read', c, e && e.code); }
   }
   return out;
 }
@@ -459,7 +461,7 @@ function subscribeDocs() {
     try {
       DB.collection(c).onSnapshot((q) => {
         if (Net.role === 'host' || Net.role === 'local') return;
-        for (const ch of q.docChanges()) { if (ch.type === 'removed') continue; if (ch.doc.metadata && ch.doc.metadata.hasPendingWrites) continue; applyDoc(c + '/' + ch.doc.id, ch.doc.data()); }
+        for (const ch of q.docChanges()) { if (ch.type === 'removed') continue; if (ch.doc.metadata && ch.doc.metadata.hasPendingWrites) continue; applyDoc(c + '/' + ch.doc.id, thaw(ch.doc.data())); }
       }, (e) => console.warn('subscription', c, e && e.code));
     } catch (e) { console.warn('subscribe', c, e); }
   }
@@ -481,16 +483,16 @@ function setupRoom() {
     }
     emitLocal('peers', Net.peers);
   });
-  ROOM.on('b', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onBubbles(m.data); });
-  ROOM.on('e', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onEvents(m.data); });
-  ROOM.on('m', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onMind(m.data); });
-  ROOM.on('x', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onEdits(m.data); });
+  ROOM.on('b', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onBubbles(thaw(m.data)); });
+  ROOM.on('e', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onEvents(thaw(m.data)); });
+  ROOM.on('m', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onMind(thaw(m.data)); });
+  ROOM.on('x', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onEdits(thaw(m.data)); });
   ROOM.on('k', (m) => { if (Net.role !== 'host' && isHostMsg(m)) onTasks(m.data); });
   ROOM.on('rpc', (m) => {
     if (Net.role !== 'host' || !m.data || typeof m.data !== 'object') return;
     // a visitor can only act as themselves
     const pid = m.by ? pidFor(m.by) : null;
-    let res; try { res = pid ? Sync.rpc(String(m.data.op).slice(0, 20), pid, m.data.args) : { ok: false, error: 'sign in to take part' }; } catch (e) { res = { ok: false, error: 'failed' }; console.warn(e); }
+    let res; try { res = pid ? Sync.rpc(String(m.data.op).slice(0, 20), pid, thaw(m.data.args)) : { ok: false, error: 'sign in to take part' }; } catch (e) { res = { ok: false, error: 'failed' }; console.warn(e); }
     let body = { id: m.data.id, to: m.peer, res };
     if (JSON.stringify(body).length > 3800) body = { id: m.data.id, to: m.peer, res: { ok: res && res.ok, error: res && res.error, result: Array.isArray(res && res.result) ? res.result.slice(0, 3).map(l => Object.assign({}, l, { text: String(l.text || '').slice(0, 400) })) : undefined } };
     ROOM.emit('rpcr', body).catch(() => {});

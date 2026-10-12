@@ -105,6 +105,8 @@ Sync.shards = shardsOf;
 // docs: { 'world/core': body, 'agents/s0': body, ... } \u2192 a live state installed into Sim
 Sync.build = function (docs, opts) {
   opts = opts || {};
+  // documents from the store are frozen: build from a private copy
+  docs = JSON.parse(JSON.stringify(docs || {}));
   const core = docs['world/core'], feed = docs['world/feed'] || {}, rum = docs['world/rumors'] || {};
   if (!core) return null;
   World.clearEdits(); World.generate(4242);

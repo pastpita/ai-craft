@@ -77,7 +77,7 @@ let booted = false;
   const t0 = performance.now();
   try { await Net.boot(loadStep); }
   catch (e) { console.error(e); loadStep('COULD NOT REACH THE SHARED WORLD \u00B7 STARTING A PRIVATE PREVIEW', 0.4); Net.transport = 'none'; }
-  if (!S()) { Sim.newWorld(); Net.meta = { worldId: S().worldId, clock: { epoch: Date.now(), t0: S().t } }; Net.role = 'local'; }
+  if (!S()) { Sim.newWorld(); Net.meta = { worldId: S().worldId, clock: { epoch: Date.now(), t0: S().t } }; Net.transport = 'none'; Net.role = 'booting'; }
   // spawn on Highvale square, on open ground
   hv = W.places.highvale_plaza;
   if (hv) { const sp = hv.spots.find(([x, z]) => !W.isSolid(x + 0.5, W.standAt(x + 0.5, z + 0.5) + 0.5, z + 0.5)) || hv.center; P.x = sp[0] + 0.5; P.z = sp[1] + 0.5; P.y = W.standAt(P.x, P.z); cam.x = P.x + 10; cam.z = P.z + 24; }
