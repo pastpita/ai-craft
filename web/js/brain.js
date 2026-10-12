@@ -8,57 +8,67 @@ const AV = root.AV = root.AV || {};
 const Brain = AV.Brain = {};
 
 // ---------- voxel model (deterministic, solid) ----------
-// returns [x, y, z, kind] with kind: 'g' surface cube (grass on top), 'd' dirt, 's' stone stem
+// A brain seen from the side: frontal, parietal, occipital and temporal lobes with winding folds,
+// a striped cerebellum under the back and a stone brain stem. x = width (two hemispheres),
+// y = up, z = front (+) / back (-).
+// returns [x, y, z, kind] with kind: 'g' grass-covered ridge, 'd' dirt groove, 's' stone stem
+Brain.ANGLE = -1.15; // turned so the side of the brain faces the viewer
 Brain.voxels = function () {
   if (Brain._vox) return Brain._vox;
-  const inHemi = (x, y, z) => {
-    for (const side of [-1, 1]) {
-      const cx = side * 5.4;
-      const nx = (x - cx) / 6.6, ny = (y - 0.4) / 7.0, nz = z / 9.6;
-      // flatter underside, a fuller frontal lobe, temporal lobes bulging low
-      const under = y < -2 ? 0.12 * (-2 - y) / 4 : 0;
-      const temporal = y < -1 && y > -5 && z > -3 && z < 5 && Math.abs(x) > 6 ? 0.1 : 0;
-      if (nx * nx + ny * ny + nz * nz < 1 - under + temporal) return side;
-    }
-    return 0;
-  };
-  const solid = new Map();
   const key = (x, y, z) => x + ',' + y + ',' + z;
-  for (let x = -12; x <= 12; x++) for (let y = -6; y <= 8; y++) for (let z = -10; z <= 10; z++) {
-    // longitudinal fissure: an open groove on top, joined underneath
-    if (Math.abs(x) < 1.5) { if (y > -3 || !inHemi(x > 0 ? 2 : -2, y, z)) continue; solid.set(key(x, y, z), [x, y, z, 'b']); continue; }
-    if (!inHemi(x, y, z)) continue;
-    solid.set(key(x, y, z), [x, y, z]);
+  const E = (x, y, z, cx, cy, cz, rx, ry, rz) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2;
+  // lobes: centre and radii per hemisphere side
+  const CB = [5.2, 1.0, 0.5, 5.9, 8.9, 13.4], TL = [6.0, -4.9, 3.4, 4.4, 3.3, 7.6], CE = [3.8, -7.0, -10.0, 4.4, 3.2, 4.6];
+  const part = new Map();
+  for (let x = -12; x <= 12; x++) for (let y = -16; y <= 12; y++) for (let z = -16; z <= 16; z++) {
+    const ax = Math.abs(x), side = x >= 0 ? 1 : -1;
+    if (ax < 1 && y > -2) continue; // the fissure between the hemispheres
+    const taper = z < -4 ? 1 - (-4 - z) * 0.025 : 1, lift = z > 3 ? (z - 3) * 0.06 : 0;
+    const cb = E(x, y, z, side * CB[0], CB[1] + lift, CB[2], CB[3] * taper, CB[4], CB[5]) < 1 && y > -5.0 + Math.max(0, -z - 7) * 0.35 + Math.max(0, z - 5) * 0.3;
+    const tl = E(x, y, z, side * TL[0], TL[1], TL[2], TL[3], TL[4], TL[5]) < 1;
+    const ce = ax >= 1 && E(x, y, z, side * CE[0], CE[1], CE[2], CE[3], CE[4], CE[5]) < 1;
+    if (cb) part.set(key(x, y, z), 'cb'); else if (tl) part.set(key(x, y, z), 'tl'); else if (ce) part.set(key(x, y, z), 'ce');
   }
-  // folds: one-block grooves cut into the upper surface so the dirt shows like terraces
-  const depthFromTop = (x, y, z) => { let d = 0; while (solid.has(key(x, y + d + 1, z))) d++; return d; };
-  for (const [k, v] of [...solid]) {
-    const [x, y, z] = v;
-    const top = depthFromTop(x, y, z);
-    if (top > 0) continue;
+  for (let y = -15; y <= -3; y++) { // brain stem, angled down and back
+    const cz = -3.5 - (-3 - y) * 0.28;
+    for (let x = -2; x <= 2; x++) for (let z = -10; z <= 2; z++) if (x * x / 4.2 + (z - cz) ** 2 / 3.2 <= 1 && !part.has(key(x, y, z))) part.set(key(x, y, z), 'st');
+  }
+  const solid = new Set(part.keys());
+  const has = (x, y, z) => solid.has(key(x, y, z));
+  const surface = (x, y, z) => !(has(x + 1, y, z) && has(x - 1, y, z) && has(x, y + 1, z) && has(x, y - 1, z) && has(x, y, z + 1) && has(x, y, z - 1));
+  // folds: lines of constant width traced by a smooth winding pattern, read on the side (y, z) or the top (x, z)
+  const fold = (u, z) => Math.sin(0.55 * z + 1.4 * Math.sin(0.5 * u)) + Math.sin(0.62 * u + 1.3 * Math.sin(0.42 * z));
+  const carved = [];
+  for (const k of solid) {
+    const [x, y, z] = k.split(',').map(Number); const p = part.get(k);
+    if (p === 'st' || !surface(x, y, z)) continue;
     const ax = Math.abs(x);
-    const fold = Math.sin(z * 0.78 + Math.sin(ax * 0.5) * 1.4) + 0.55 * Math.sin(ax * 0.9 + z * 0.25);
-    const central = Math.abs(z - 0.5 + (ax - 6) * 0.35) < 0.55; // central sulcus
-    if ((Math.abs(fold) < 0.28 && ax > 1 && ax < 11) || (central && y > 0)) { solid.delete(k); if (Math.abs(fold) < 0.16 && y > 1) solid.delete(key(x, y - 1, z)); }
+    if (p === 'ce') { if (((y % 2) + 2) % 2 === 0 && y > -10 && y < -4 && ax > 1) carved.push(k); continue; } // folia
+    const L = p === 'tl' ? TL : CB;
+    const nx = (ax - L[0]) / (L[3] * L[3]), ny = (y - L[1]) / (L[4] * L[4]);
+    const lat = Math.abs(nx) > Math.abs(ny) * 0.9;
+    const F = lat ? fold : (a, b) => fold(a * 1.6 + 6, b);
+    const u = lat ? y : ax;
+    const f = F(u, z), g = Math.hypot(F(u + 0.5, z) - F(u - 0.5, z), F(u, z + 0.5) - F(u, z - 0.5));
+    const sylvian = p === 'cb' && ax >= 6 && Math.abs(y - (-2.6 + (3 - z) * 0.22)) < 1.0 && z > -6 && z < 12;
+    const central = p === 'cb' && y > -1.5 && Math.abs(z - (0.5 - (y - 2) * 0.45)) < 0.55;
+    if (Math.abs(f) / Math.max(0.05, g) < 0.66 || sylvian || central) carved.push(k);
   }
-  // lateral fissure along each side
-  for (const [k, v] of [...solid]) { const [x, y, z] = v; if (Math.abs(x) >= 9 && Math.abs(y + 1.2 - z * 0.15) < 0.6 && z > -2 && z < 8 && !solid.has(key(x + Math.sign(x), y, z))) solid.delete(k); }
-  // cerebellum under the back
-  for (let x = -6; x <= 6; x++) for (let y = -7; y <= -3; y++) for (let z = -10; z <= -5; z++) {
-    if (Math.abs(x) < 1) continue;
-    const d = (x * x) / 30 + ((y + 4.8) ** 2) / 5 + ((z + 7.6) ** 2) / 7;
-    if (d < 1 && !solid.has(key(x, y, z))) solid.set(key(x, y, z), [x, y, z, 'c']);
-  }
+  const cut = new Set(carved);
+  for (const k of cut) solid.delete(k);
   const out = [];
-  for (const v of solid.values()) {
-    const [x, y, z] = v;
-    // hidden cubes are never drawn
-    const nb = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].every(([a, b, c]) => solid.has(key(x + a, y + b, z + c)));
-    if (nb) continue;
-    out.push([x, y, z, v[3] === 'b' || solid.has(key(x, y + 1, z)) ? 'd' : 'g']);
+  for (const k of solid) {
+    const [x, y, z] = k.split(',').map(Number); const p = part.get(k);
+    if (!surface(x, y, z)) continue; // hidden cubes are never drawn
+    if (p === 'st') { out.push([x, y, z, 's']); continue; }
+    // a groove floor: the cell just outside, along the main outward direction, was cut away
+    const L = p === 'ce' ? CE : p === 'tl' ? TL : CB; const sx = Math.sign(x) || 1;
+    const n = [(x - sx * L[0]) / L[3] ** 2, (y - L[1]) / L[4] ** 2, (z - L[2]) / L[5] ** 2];
+    const m = Math.max(...n.map(Math.abs)); const d = n.map(c => (Math.abs(c) >= m * 0.6 ? Math.sign(c) : 0));
+    let groove = cut.has(key(x + d[0], y + d[1], z + d[2]));
+    if (!groove) for (const [a, b, c] of [[d[0], 0, 0], [0, d[1], 0], [0, 0, d[2]]]) if ((a || b || c) && cut.has(key(x + a, y + b, z + c))) groove = true;
+    out.push([x, y, z, groove ? 'd' : 'g']);
   }
-  // stone stem
-  for (let y = -10; y <= -5; y++) for (let x = -1; x <= 1; x++) for (let z = -5; z <= -3; z++) if (x * x + (z + 4) ** 2 <= 2 && !solid.has(key(x, y, z))) out.push([x, y, z, 's']);
   Brain._vox = out;
   return out;
 };
@@ -90,10 +100,22 @@ Brain.textures = function () {
   const dark = (cv, f, tint) => { const c = document.createElement('canvas'); c.width = 16; c.height = 16; const g = c.getContext('2d'); g.drawImage(cv, 0, 0); g.fillStyle = tint; g.globalAlpha = f; g.fillRect(0, 0, 16, 16); return c; };
   const soil = dark(dirt, 0.84, '#14100b');
   const slab = dark(stone, 0.78, '#2a2925');
-  Brain._tex = { top, dirt, side, stone, plank, soil, slab };
+  // the brain's own blocks: calmer grass so the folds read as lines, darker soil in the grooves
+  const ridge = tex((g, r) => { const P = ['#6aab40', '#6fb043', '#73b547', '#67a63d']; for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, P[Math.floor(r() * P.length)]); }, 66);
+  const groove = tex((g, r) => { const P = ['#7b5434', '#6a462a', '#8a6140', '#734e30']; for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, P[Math.floor(r() * P.length)]); }, 77);
+  Brain._tex = { top, dirt, side, stone, plank, soil, slab, ridge, groove };
   return Brain._tex;
 };
 
+// block faces shaded like a block game: tops brightest, the two side axes a step darker, undersides darkest
+function blockGeo(THREE, size) {
+  const g = new THREE.BoxGeometry(size, size, size);
+  const shade = [0.8, 0.8, 1.0, 0.55, 0.68, 0.68]; // +x, -x, +y, -y, +z, -z
+  const c = new Float32Array(24 * 3);
+  for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) c.set([shade[f], shade[f], shade[f]], (f * 4 + v) * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
 // ---------- 3D mark ----------
 // opts: { assembled, orbit, onPick(id), onHover(id), still (no rotation), angle, preserve }
 Brain.mount = function (canvas, opts) {
@@ -103,24 +125,25 @@ Brain.mount = function (canvas, opts) {
   r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(26, 1, 1, 500);
-  cam.position.set(0, 38, 60); cam.lookAt(0, -1, 0);
+  cam.position.set(0, 24, 66); cam.lookAt(0, -1, 0);
   scene.add(new THREE.HemisphereLight('#fff8e8', '#55503f', 0.95));
   const dl = new THREE.DirectionalLight('#fff4dc', 0.55); dl.position.set(-30, 50, 40); scene.add(dl);
   const T = Brain.textures();
-  const mk = (cv) => { const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return new THREE.MeshLambertMaterial({ map: t }); };
-  const mTop = mk(T.top), mSide = mk(T.side), mDirt = mk(T.dirt), mStone = mk(T.stone);
+  const mk = (cv) => { const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return new THREE.MeshLambertMaterial({ map: t, vertexColors: true }); };
+  const mTop = mk(T.top), mSide = mk(T.side), mDirt = mk(T.dirt), mStone = mk(T.stone), mRidge = mk(T.ridge), mGroove = mk(T.groove);
   const vox = Brain.voxels();
   const groups = { g: [], d: [], s: [] };
   vox.forEach((v, i) => groups[v[3] === 'g' ? 'g' : v[3] === 's' ? 's' : 'd'].push(i));
-  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const geo = blockGeo(THREE, 1);
   const meshes = [];
   const mkInst = (list, mats) => { const m = new THREE.InstancedMesh(geo, mats, list.length); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.userData.list = list; meshes.push(m); return m; };
   const group = new THREE.Group(); scene.add(group);
+  group.scale.setScalar(0.74); group.position.y = 1.4; // the side-view model is longer than it is tall
   // box face order: +x, -x, +y, -y, +z, -z
-  group.add(mkInst(groups.g, [mSide, mSide, mTop, mDirt, mSide, mSide]));
-  group.add(mkInst(groups.d, mDirt));
+  group.add(mkInst(groups.g, mRidge));
+  group.add(mkInst(groups.d, mGroove));
   group.add(mkInst(groups.s, mStone));
-  group.rotation.y = opts.angle !== undefined ? opts.angle : -0.24;
+  group.rotation.y = opts.angle !== undefined ? opts.angle : Brain.ANGLE;
   const N = vox.length;
   const home = new Float32Array(N * 3), from = new Float32Array(N * 3), delay = new Float32Array(N), glow = new Float32Array(N);
   const R0 = rng(7);
@@ -129,7 +152,7 @@ Brain.mount = function (canvas, opts) {
     home[i * 3] = x; home[i * 3 + 1] = y; home[i * 3 + 2] = z;
     const a = R0() * Math.PI * 2, rr = 36 + R0() * 40;
     from[i * 3] = Math.cos(a) * rr; from[i * 3 + 1] = 30 + R0() * 30; from[i * 3 + 2] = Math.sin(a) * rr;
-    delay[i] = ((y + 11) / 19) * 0.9 + R0() * 0.35; // cubes drop in bottom-up, like building a hill
+    delay[i] = ((y + 15) / 27) * 0.9 + R0() * 0.35; // cubes drop in bottom-up, like building a hill
   }
   const dummy = new THREE.Object3D(); const col = new THREE.Color();
   const st = { t0: performance.now(), assemble: opts.assembled ? 0 : 2.4, hover: 0, hoverT: 0, orbit: [], dead: false, spin: 0, pulse: 0 };
@@ -161,7 +184,7 @@ Brain.mount = function (canvas, opts) {
     const t = (now - st.t0) / 1000;
     st.hover += (st.hoverT - st.hover) * 0.06;
     if (!opts.still && !reduce) st.spin += 0.0016 + st.hover * 0.001;
-    if (!opts.still) { group.rotation.y = (opts.angle !== undefined ? opts.angle : -0.24) + Math.sin(st.spin) * 0.5; }
+    if (!opts.still) { group.rotation.y = (opts.angle !== undefined ? opts.angle : Brain.ANGLE) + Math.sin(st.spin) * 0.5; }
     const pulseAge = (now - st.pulse) / 1000;
     for (const m of meshes) {
       const list = m.userData.list;
@@ -220,24 +243,24 @@ Brain.hero = function (canvas, opts) {
   const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene();
-  const cam = new THREE.PerspectiveCamera(30, 1, 1, 600);
-  cam.position.set(0, 30, 52); cam.lookAt(0, -1.5, 0);
-  scene.add(new THREE.HemisphereLight('#fff8e8', '#4b4636', 0.9));
-  const key = new THREE.DirectionalLight('#fff1d6', 0.62); key.position.set(-30, 46, 40); scene.add(key);
-  const rim = new THREE.DirectionalLight('#b9f66d', 0.45); rim.position.set(30, 10, -50); scene.add(rim);
+  const cam = new THREE.PerspectiveCamera(19, 1, 1, 900);
+  cam.position.set(0, 27, 88); cam.lookAt(0, -1.5, 0);
+  scene.add(new THREE.HemisphereLight('#fff8e8', '#5a5240', 0.95));
+  const key = new THREE.DirectionalLight('#fff1d6', 0.45); key.position.set(-30, 46, 40); scene.add(key);
+  const rim = new THREE.DirectionalLight('#b9f66d', 0.22); rim.position.set(30, 10, -50); scene.add(rim);
   const T = Brain.textures();
-  const mk = (cv) => { const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return new THREE.MeshLambertMaterial({ map: t }); };
-  const mTop = mk(T.top), mSide = mk(T.side), mDirt = mk(T.dirt), mStone = mk(T.stone);
+  const mk = (cv) => { const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return new THREE.MeshLambertMaterial({ map: t, vertexColors: true }); };
+  const mTop = mk(T.top), mSide = mk(T.side), mDirt = mk(T.dirt), mStone = mk(T.stone), mRidge = mk(T.ridge), mGroove = mk(T.groove);
   const vox = Brain.voxels(); const N = vox.length;
-  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const geo = blockGeo(THREE, 1);
   const rig = new THREE.Group(); scene.add(rig);
   const spin = new THREE.Group(); rig.add(spin);
-  spin.position.y = 1.2;
+  spin.position.y = 2.4; spin.scale.setScalar(0.8);
   const lists = { g: [], d: [], s: [] };
   vox.forEach((v, i) => lists[v[3] === 'g' ? 'g' : v[3] === 's' ? 's' : 'd'].push(i));
   const meshes = [];
   const inst = (list, mats) => { const m = new THREE.InstancedMesh(geo, mats, list.length); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.userData.list = list; meshes.push(m); spin.add(m); return m; };
-  inst(lists.g, [mSide, mSide, mTop, mDirt, mSide, mSide]); inst(lists.d, mDirt); inst(lists.s, mStone);
+  inst(lists.g, mRidge); inst(lists.d, mGroove); inst(lists.s, mStone);
   // positions, assembly paths and the neighbour graph the sparks run along
   const home = new Float32Array(N * 3), from = new Float32Array(N * 3), delay = new Float32Array(N), lift = new Float32Array(N);
   const R0 = rng(19); const idx = new Map();
@@ -245,7 +268,7 @@ Brain.hero = function (canvas, opts) {
     const [x, y, z] = vox[i]; home[i * 3] = x; home[i * 3 + 1] = y; home[i * 3 + 2] = z; idx.set(x + ',' + y + ',' + z, i);
     const a = R0() * Math.PI * 2, rr = 40 + R0() * 50;
     from[i * 3] = Math.cos(a) * rr; from[i * 3 + 1] = -40 - R0() * 40; from[i * 3 + 2] = Math.sin(a) * rr;
-    delay[i] = ((y + 11) / 19) * 1.3 + R0() * 0.5;
+    delay[i] = ((y + 15) / 27) * 1.3 + R0() * 0.5;
   }
   const nb = []; for (let i = 0; i < N; i++) { const [x, y, z] = vox[i]; const L = []; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) { if (!dx && !dy && !dz) continue; const j = idx.get((x + dx) + ',' + (y + dy) + ',' + (z + dz)); if (j !== undefined && vox[j][3] !== 's') L.push(j); } nb.push(L); }
   const cortex = []; for (let i = 0; i < N; i++) if (vox[i][3] !== 's' && vox[i][1] > -3) cortex.push(i);
@@ -261,7 +284,7 @@ Brain.hero = function (canvas, opts) {
   const hc = document.createElement('canvas'); hc.width = hc.height = 128; const hg = hc.getContext('2d'); const grd = hg.createRadialGradient(64, 64, 4, 64, 64, 64); grd.addColorStop(0, 'rgba(185,246,109,0.55)'); grd.addColorStop(0.45, 'rgba(120,190,70,0.18)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); hg.fillStyle = grd; hg.fillRect(0, 0, 128, 128);
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(hc), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.5 })); halo.scale.set(62, 62, 1); halo.position.set(0, 1, -14); scene.add(halo);
   // thought blocks drifting up around the brain
-  const PN = 34; const parts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), [mSide, mSide, mTop, mDirt, mSide, mSide], PN); parts.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(parts);
+  const PN = 34; const parts = new THREE.InstancedMesh(blockGeo(THREE, 0.5), [mSide, mSide, mTop, mDirt, mSide, mSide], PN); parts.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(parts);
   const P = []; for (let k = 0; k < PN; k++) P.push({ a: R0() * Math.PI * 2, r: 13 + R0() * 16, y: -14 + R0() * 34, v: 0.8 + R0() * 1.6, rot: R0() * 6, rs: (R0() - 0.5) * 2 });
   // villagers circling the mind
   const orbitG = new THREE.Group(); scene.add(orbitG);
@@ -286,7 +309,7 @@ Brain.hero = function (canvas, opts) {
   const gc = document.createElement('canvas'); gc.width = gc.height = 64; const gg = gc.getContext('2d'); const gr = gg.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, 64, 64);
   const gtex = new THREE.CanvasTexture(gc);
   const heads = []; for (let k = 0; k < 16; k++) { const h = new THREE.Sprite(new THREE.SpriteMaterial({ map: gtex, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0 })); h.scale.set(5, 5, 1); spin.add(h); heads.push(h); }
-  const st = { t0: performance.now(), last: performance.now(), hover: 0, hoverT: 0, mx: 0, my: 0, tx: 0, ty: 0, beat: -9, beatK: 0, dead: false, idleAcc: 0, rate: 1.5 };
+  const st = { turn: 0, t0: performance.now(), last: performance.now(), hover: 0, hoverT: 0, mx: 0, my: 0, tx: 0, ty: 0, beat: -9, beatK: 0, dead: false, idleAcc: 0, rate: 1.5 };
   const v3 = new THREE.Vector3(), v4 = new THREE.Vector3();
   const worldOf = (i, out) => out.set(home[i * 3], home[i * 3 + 1], home[i * 3 + 2]).applyMatrix4(spin.matrixWorld);
   function facing(i) { worldOf(i, v3); v4.copy(cam.position).sub(v3).normalize(); const nx = home[i * 3], ny = home[i * 3 + 1] - 0.5, nz = home[i * 3 + 2]; v3.set(nx, ny, nz).normalize().transformDirection(spin.matrixWorld); return v3.dot(v4); }
@@ -322,7 +345,7 @@ Brain.hero = function (canvas, opts) {
   });
   function size() {
     const w = canvas.clientWidth || 300, h = canvas.clientHeight || 300;
-    if (canvas.width !== Math.round(w * r.getPixelRatio()) || canvas.height !== Math.round(h * r.getPixelRatio())) { r.setSize(w, h, false); cam.aspect = w / h; cam.position.z = w / h < 0.9 ? 86 : 52; cam.position.y = w / h < 0.9 ? 40 : 30; cam.updateProjectionMatrix(); }
+    if (canvas.width !== Math.round(w * r.getPixelRatio()) || canvas.height !== Math.round(h * r.getPixelRatio())) { r.setSize(w, h, false); cam.aspect = w / h; cam.position.z = 88 * Math.max(1, 1.3 / (w / h)); cam.position.y = cam.position.z * 0.31; /* narrow screens step back so the whole brain fits */ cam.lookAt(0, -1.5, 0); cam.updateProjectionMatrix(); }
   }
   const reduce = root.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const dummy = new THREE.Object3D(); const col = new THREE.Color();
@@ -334,7 +357,8 @@ Brain.hero = function (canvas, opts) {
     st.hover += (st.hoverT - st.hover) * Math.min(1, dt * 4);
     st.mx += (st.tx - st.mx) * Math.min(1, dt * 3); st.my += (st.ty - st.my) * Math.min(1, dt * 3);
     // slow turn, float, lean toward the pointer
-    if (!reduce) spin.rotation.y += dt * (0.16 + st.hover * 0.05);
+    if (!reduce) st.turn += dt * (0.16 + st.hover * 0.05);
+    spin.rotation.y = Brain.ANGLE + Math.sin(st.turn) * 0.55; // swings to show both sides and the front, mostly side-on
     rig.rotation.x = -st.my * 0.16 + Math.sin(t * 0.6) * 0.03; rig.rotation.z = Math.sin(t * 0.45) * 0.02; rig.rotation.y = st.mx * 0.32;
     rig.position.y = Math.sin(t * 1.1) * 0.6;
     const ba = (now - st.beat) / 1000; const bk = ba < 1 ? Math.exp(-ba * 5) * st.beatK : 0;
@@ -360,7 +384,7 @@ Brain.hero = function (canvas, opts) {
           const spinA = (1 - kk) * 6;
           dummy.position.set(from[i * 3] + (home[i * 3] - from[i * 3]) * kk + hx / hl * L, from[i * 3 + 1] + (home[i * 3 + 1] - from[i * 3 + 1]) * kk + hy / hl * L, from[i * 3 + 2] + (home[i * 3 + 2] - from[i * 3 + 2]) * kk + hz / hl * L);
           dummy.rotation.set(spinA, spinA * 0.7, 0);
-          const s = k <= 0 ? 0.0001 : 0.985; dummy.scale.set(s, s, s);
+          const s = k <= 0 ? 0.0001 : 1.0; dummy.scale.set(s, s, s);
           dummy.updateMatrix(); m.setMatrixAt(j, dummy.matrix);
         }
         m.instanceMatrix.needsUpdate = true;
@@ -429,7 +453,7 @@ Brain.snapshot = function (size, angle) {
   try {
     const cv = document.createElement('canvas'); cv.width = size; cv.height = size;
     cv.style.width = size + 'px'; cv.style.height = size + 'px';
-    const m = Brain.mount(cv, { assembled: true, still: true, manual: true, preserve: true, angle: angle === undefined ? -0.24 : angle });
+    const m = Brain.mount(cv, { assembled: true, still: true, manual: true, preserve: true, angle: angle === undefined ? Brain.ANGLE : angle });
     const url = m.snapshot();
     m.destroy();
     return url;
