@@ -96,6 +96,8 @@ let booted = false;
   loadStep('WORLD ONLINE', 1);
   setTimeout(() => { $('loading').classList.add('done'); setTimeout(() => { loadBrain.destroy(); $('loading').remove(); }, 600); }, 450);
   booted = true;
+  // whatever happened while connecting, the world must keep its clock
+  if (Net.rescue) { Net.rescue(); setInterval(() => Net.rescue(), 5000); }
   const hash = (location.hash || '').replace('#', '');
   AV.Pages.go(['home', 'world', 'minds', 'villages', 'network', 'history'].includes(hash) ? hash : 'home');
   setTimeout(sinceLastVisit, 1400);

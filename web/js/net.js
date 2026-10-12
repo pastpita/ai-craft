@@ -13,6 +13,8 @@ const Sim = AV.Sim, Civ = AV.Civ, Sync = AV.Sync;
 const S = () => Sim.S();
 
 const LEASE_MS = 20000, RENEW_MS = 6000;
+// a store call that never answers must not freeze the world
+const within = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: 'timeout', message: what + ' timed out' }), ms))]);
 const TAB = 't' + Math.random().toString(36).slice(2, 10);
 const pref = {
   get(k) { try { return localStorage.getItem('aicraft.' + k); } catch (e) { return null; } },
@@ -27,18 +29,26 @@ const Net = AV.Net = {
   pid: null, name: pref.get('name') || '',
   peers: [], online: 1,
   hb: { d: 0, m: 0, c: 0, l: 0, w: 0, n: 0, dd: 0, dm: 0 }, hbAt: 0, hbHist: [],
-  frameAt: 0, lastSave: 0, status: '', listeners: {},
+  frameAt: 0, lastSave: 0, lastError: '', saveFails: 0, status: '', listeners: {},
   tab: TAB,
 };
 const emitLocal = (k, v) => { for (const fn of Net.listeners[k] || []) try { fn(v); } catch (e) { console.warn(e); } };
 Net.on = (k, fn) => { (Net.listeners[k] = Net.listeners[k] || []).push(fn); };
 Net.clockNow = () => Net.meta && Net.meta.clock ? Sync.clockNow(Net.meta.clock) : S().t;
 Net.label = function () {
-  if (Net.role === 'host') return 'LIVE \u00B7 you are hosting the simulation';
+  if (Net.role === 'host') { const ago = Net.lastSave ? Math.round((Date.now() - Net.lastSave) / 1000) : -1; return ago < 0 || ago > 90 ? 'LIVE \u00B7 hosting \u00B7 NOT SAVING' + (Net.lastError ? ' (' + Net.lastError + ')' : '') : 'LIVE \u00B7 you are hosting the simulation'; }
   if (Net.role === 'follower') return Net.transport === 'server' ? 'LIVE \u00B7 server world' : 'LIVE \u00B7 shared world';
   if (Net.role === 'projection') return 'LOCAL PROJECTION \u00B7 no host online';
   if (Net.role === 'local') return 'PRIVATE PREVIEW \u00B7 not shared or saved';
   return 'CONNECTING';
+};
+// if the boot failed half way, keep the world alive here and keep trying to host
+Net.rescue = function () {
+  if (Net.role === 'host' || Net.role === 'local' || Net.role === 'projection' || Net.role === 'follower') return false;
+  console.warn('boot did not finish: projecting locally');
+  if (!Net.meta || !Net.meta.clock) Net.meta = { worldId: S().worldId, clock: { epoch: Date.now(), t0: S().t } };
+  if (Net.transport === 'artifact') becomeFollower(); else becomeProjection();
+  return true;
 };
 Net.shared = () => Net.transport === 'artifact' || Net.transport === 'server';
 
@@ -197,12 +207,12 @@ const tick = () => new Promise(r => setTimeout(r, 16));
 async function readAll() {
   const out = {};
   for (const c of ['world', 'agents', 'edits', 'history']) {
-    try { const q = await DB.collection(c).get(); for (const d of q.docs) if (d.exists) out[c + '/' + d.id] = d.data(); } catch (e) { console.warn('read', c, e && e.code); }
+    try { const q = await within(DB.collection(c).get(), 20000, 'read ' + c); for (const d of q.docs) if (d.exists) out[c + '/' + d.id] = d.data(); } catch (e) { console.warn('read', c, e && e.code); }
   }
   return out;
 }
 async function tryLease() {
-  try { const r = await DB.doc('world/lock').acquire({ holder: TAB, ttlMs: LEASE_MS }); return !!r.acquired; } catch (e) { if (e && (e.code === 'invalid_argument' || e.code === 'not_granted')) Net.canWrite = false; return false; }
+  try { const r = await within(DB.doc('world/lock').acquire({ holder: TAB, ttlMs: LEASE_MS }), 10000, 'lease'); return !!(r && r.acquired); } catch (e) { Net.lastError = 'lease ' + ((e && e.code) || 'error'); if (e && (e.code === 'invalid_argument' || e.code === 'not_granted' || e.code === 'revoked')) Net.canWrite = false; return false; }
 }
 
 // ---------- write queue: one write at a time per document, only when the body changed
@@ -219,11 +229,13 @@ async function pump() {
   try {
     while (queue.size && (Net.role === 'host' || Net.role === 'booting')) {
       const [key, item] = queue.entries().next().value; queue.delete(key);
-      try { await DB.doc(key).set(item.body); lastJSON[key] = item.j; Net.lastSave = Date.now(); }
+      try { await within(DB.doc(key).set(item.body), 15000, 'save'); lastJSON[key] = item.j; Net.lastSave = Date.now(); Net.saveFails = 0; Net.lastError = ''; }
       catch (e) {
-        if (e && e.code === 'invalid_argument') { Net.canWrite = false; console.warn('write refused', key, e.message); }
-        else if (e && (e.code === 'resource_exhausted' || e.code === 'unavailable')) { queue.set(key, item); await sleep(2500); }
-        else console.warn('write failed', key, e && e.code);
+        const code = (e && e.code) || 'error'; Net.saveFails++; Net.lastError = 'save ' + code;
+        if (code === 'invalid_argument' || code === 'quota_exceeded') console.warn('write refused', key, e && e.message);
+        else if (code === 'not_granted' || code === 'revoked') { Net.canWrite = false; console.warn('no write access', key); }
+        else if (code === 'resource_exhausted' || code === 'unavailable' || code === 'timeout') { if (!queue.has(key)) queue.set(key, item); await sleep(2500); }
+        else console.warn('write failed', key, code);
       }
     }
   } finally { writing = false; }
@@ -251,6 +263,7 @@ function becomeHost() {
   clearInterval(renewTimer);
   renewTimer = setInterval(async () => {
     if (Net.role !== 'host') return;
+    if (!Net.canWrite) { console.warn('cannot write: hosting locally'); clearInterval(renewTimer); becomeProjection(); return; }
     const ok = await tryLease();
     if (!ok && Net.role === 'host') { console.warn('lost the host lease'); demote(); }
   }, RENEW_MS);
@@ -316,7 +329,7 @@ function demote() {
 }
 
 // ---------- follower
-let watchdog = null;
+let watchdog = null, watching = false;
 function becomeFollower(fromHost) {
   if (Net.role !== 'follower') Net.role = 'follower';
   emitLocal('role', 'follower');
@@ -324,17 +337,21 @@ function becomeFollower(fromHost) {
   clearInterval(watchdog);
   // if the host disappears, the next writer takes over; a viewer who cannot write projects locally
   watchdog = setInterval(async () => {
-    if (Net.role === 'host') return;
+    if (Net.role === 'host' || watching) return;
     const quiet = performance.now() - Net.frameAt > 9000;
     if (!quiet) return;
-    if (Net.canWrite && Net.transport === 'artifact') {
-      if (await tryLease()) {
+    watching = true;
+    try {
+      if (Net.canWrite && Net.transport === 'artifact' && await tryLease()) {
         // promote: catch up from the last state we have and continue
         const gap = Net.clockNow() - S().t; if (gap > 1) Civ.catchUp(Math.floor(gap));
         becomeHost();
-        saveAll(false);
+        saveAll(true);
+      } else if (Net.role !== 'projection') {
+        // nobody is sending the world: run it here so time and work go on, and keep trying to host
+        becomeProjection();
       }
-    } else if (Net.role !== 'projection') becomeProjection();
+    } finally { watching = false; }
   }, 4000);
   startFollowLoops();
 }
