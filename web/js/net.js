@@ -132,6 +132,7 @@ async function bootServer(step) {
   startFollowLoops();
 }
 function handleServerMsg(m) {
+  if (m.k === 'meta') { Net.meta = m.meta; return; } // the server slowed the clock
   if (m.k === 'f') onFrame(m);
   else if (m.k === 'b') onBubbles(m.d);
   else if (m.k === 'e') onEvents(m.d);

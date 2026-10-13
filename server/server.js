@@ -31,13 +31,13 @@ const Store = {
     log('storage: postgres');
   },
   async loadAll() {
-    if (!this.pool) { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { return {}; } }
+    if (!this.pool) { if (this.mem) return this.mem; try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { return {}; } }
     const r = await this.pool.query('select key, body from world_docs');
     const out = {}; for (const row of r.rows) out[row.key] = row.body; return out;
   },
   async saveDocs(docs) {
     const keys = Object.keys(docs); if (!keys.length) return;
-    if (!this.pool) { const all = await this.loadAll(); Object.assign(all, docs); fs.writeFileSync(FILE + '.tmp', JSON.stringify(all)); fs.renameSync(FILE + '.tmp', FILE); return; }
+    if (!this.pool) { if (!this.mem) this.mem = await this.loadAll(); Object.assign(this.mem, docs); await fs.promises.writeFile(FILE + '.tmp', JSON.stringify(this.mem)); await fs.promises.rename(FILE + '.tmp', FILE); return; }
     const c = await this.pool.connect();
     try {
       await c.query('begin');
@@ -58,7 +58,7 @@ const Store = {
     for (const r of rows) await this.pool.query('insert into world_metrics (world_id, day, population, wealth, buildings, houses_built, blocks_placed, blocks_mined, trees_cut, crops_harvested, farm_tiles, trade_volume, businesses, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) on conflict (world_id, day) do update set data = excluded.data', [worldId, r.d, r.pop, r.wealth, r.bld, r.housesBuilt, r.blocksPlaced, r.blocksMined, r.treesCut, r.cropsHarvested, r.farmTiles, Math.round(r.tradeVolume || 0), r.biz, JSON.stringify(r)]);
     if (totals) await this.pool.query('insert into world_metrics_totals (world_id, totals, updated_at) values ($1, $2, now()) on conflict (world_id) do update set totals = excluded.totals, updated_at = now()', [worldId, JSON.stringify(totals)]);
   },
-  async wipe() { if (this.pool) await this.pool.query('delete from world_docs'); else try { fs.unlinkSync(FILE); } catch (e) { /* none */ } },
+  async wipe() { this.mem = null; if (this.pool) await this.pool.query('delete from world_docs'); else try { fs.unlinkSync(FILE); } catch (e) { /* none */ } },
 };
 
 // ---------------- the world ----------------
@@ -102,15 +102,24 @@ async function boot() {
 }
 
 // ---------------- simulation loop ----------------
-let hbPrev = null, seq = 0, ticking = false;
+let hbPrev = null, seq = 0, ticking = false, slowed = 0;
+const TICK_MS = +process.env.AV_TICK_MS || 60;   // CPU per 250 ms tick
+const LAG_MAX = 20;                               // world minutes behind before the clock slows
 function startLoops() {
+  // Each tick may use at most TICK_MS of CPU, so pages and sockets are always served.
+  // When the machine is too slow (or its CPU is throttled) the world clock slows down instead of
+  // the server freezing: the clock is re-based to the world's own time and viewers are told.
   setInterval(() => {
     if (ticking) return; ticking = true;
     try {
-      const target = Sync.clockNow(meta.clock);
-      let gap = target - S.t;
-      if (gap > 90) { Civ.catchUp(Math.floor(gap)); gap = target - S.t; }
-      let n = 0; while (gap > 0.001 && n < 40) { const st = Math.min(1, gap); Sim.advance(st); gap -= st; n++; }
+      const t0 = Date.now();
+      let gap = Sync.clockNow(meta.clock) - S.t;
+      while (gap > 0.001 && Date.now() - t0 < TICK_MS) { const st = Math.min(1, gap); Sim.advance(st); gap -= st; }
+      if (gap > LAG_MAX) {
+        meta.clock = { epoch: Date.now(), t0: S.t }; slowed++;
+        if (slowed === 1 || slowed % 50 === 0) log('the machine is too slow for real time; the world clock slows down (' + slowed + ' times)');
+        send({ k: 'meta', meta });
+      }
     } catch (e) { log('tick error', e.stack); }
     ticking = false;
   }, 250);
