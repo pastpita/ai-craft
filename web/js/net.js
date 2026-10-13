@@ -54,13 +54,15 @@ Net.rescue = function () {
 };
 // aerial snapshots for Then / Now: loaded on demand, they are large
 Net.snaps = {};
+// snapshots of an earlier world (another size or another world id) are not shown
+Net.snapOk = (b) => b.w === World.W && (!b.wid || !S() || b.wid === S().worldId);
 Net.loadSnaps = async function () {
   const s = S();
   for (const sn of (s && s._snapQueue) || []) Net.snaps[sn.d] = sn;
   if (s && s._snaps) for (const d in s._snaps) Net.snaps[d] = s._snaps[d];
   try {
-    if (DB) { const q = await within(DB.collection('snaps').get(), 20000, 'snaps'); for (const d of q.docs) if (d.exists) { const b = thaw(d.data()); if (b && b.d) Net.snaps[b.d] = b; } }
-    else if (Net.transport === 'server') { const r = await fetch('api/snaps', { cache: 'no-store' }); if (r.ok) { const j = await r.json(); for (const b of j.snaps || []) Net.snaps[b.d] = b; } }
+    if (DB) { const q = await within(DB.collection('snaps').get(), 20000, 'snaps'); for (const d of q.docs) if (d.exists) { const b = thaw(d.data()); if (b && b.d && Net.snapOk(b)) Net.snaps[b.d] = b; } }
+    else if (Net.transport === 'server') { const r = await fetch('api/snaps', { cache: 'no-store' }); if (r.ok) { const j = await r.json(); for (const b of j.snaps || []) if (Net.snapOk(b)) Net.snaps[b.d] = b; } }
   } catch (e) { console.warn('snapshots', e && e.code); }
   return Net.snaps;
 };
@@ -298,8 +300,8 @@ function startHostLoops() {
   if (Net.transport === 'artifact') {
     let shardI = 0;
     hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); const n = Sync.shards(s); for (let k = 0; k < 2; k++) { const i = shardI++ % n; enqueue('agents/s' + i, Sync.shardDoc(s, i)); } }, 4000));
-    hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); enqueue('world/core', Sync.coreDoc(s)); enqueue('world/feed', Sync.feedDoc(s)); }, 12000));
-    hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); while (s._snapQueue && s._snapQueue.length) { const sn = s._snapQueue.shift(); enqueue('snaps/d' + sn.d, { d: sn.d, w: sn.w, h: sn.h, v: sn.v, px: sn.px }); Net.snaps[sn.d] = sn; } }, 3000));
+    hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); enqueue('world/core', Sync.coreDoc(s)); enqueue('world/estate', Sync.estateDoc(s)); enqueue('world/feed', Sync.feedDoc(s)); }, 12000));
+    hostTimers.push(setInterval(() => { if (Net.role !== 'host') return; const s = S(); while (s._snapQueue && s._snapQueue.length) { const sn = s._snapQueue.shift(); enqueue('snaps/d' + sn.d, { d: sn.d, w: sn.w, h: sn.h, v: sn.v, wid: sn.wid, px: sn.px }); Net.snaps[sn.d] = sn; } }, 3000));
     hostTimers.push(setInterval(() => {
       if (Net.role !== 'host') return; const s = S();
       enqueue('world/rumors', Sync.rumorsDoc(s));
@@ -470,6 +472,7 @@ function applyDoc(key, body) {
   const s = S(); if (!s || !body) return;
   if (key === 'world/meta') { Net.meta = Object.assign({}, Net.meta, body); return; }
   if (key === 'world/core') { Sync.applyCore(s, body); emitLocal('core'); return; }
+  if (key === 'world/estate') { Sync.applyEstate(s, body); emitLocal('core'); return; }
   if (key === 'world/feed') { Sync.applyFeed(s, body); return; }
   if (key === 'world/civ') { for (const k of Sync.CIV_KEYS) if (k in body && k !== 'plan') s[k] = body[k]; emitLocal('civ'); return; }
   if (key === 'world/rumors') { s.rumors = Object.assign(s.rumors || {}, body.rumors || {}); return; }

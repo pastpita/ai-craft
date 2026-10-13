@@ -5,7 +5,9 @@
 (function (root) {
 'use strict';
 
-const W = 208, H = 44, D = 208;
+const W = 320, H = 60, D = 320;
+// layout of the old 208-block map, scaled onto the larger one
+const SK = 1.5, SO = 4, SP = (n) => Math.round(SO + n * SK), SR = (n) => Math.round(n * SK);
 const GROUND = 9;
 const STAND = GROUND + 1;
 
@@ -43,6 +45,41 @@ const BLOCKS = [
   { name: 'stone brick', tex: [30, 30, 30] },
   { name: 'thatch', tex: [31, 31, 31] },
   { name: 'sprout', tex: [32, 32, 32], solid: false, opaque: false, shape: 'cross' },
+  // biomes
+  { name: 'snow', tex: [33, 33, 33], col: '#eef3f6', snap: 12 },
+  { name: 'snowy grass', tex: [33, 34, 2], col: '#e6eef0', snap: 12 },
+  { name: 'spruce log', tex: [36, 35, 36], col: '#4a3420', snap: 6 },
+  { name: 'spruce leaves', tex: [37, 37, 37], opaque: false, cutout: true, col: '#2f5a3a', snap: 7 },
+  { name: 'spruce planks', tex: [38, 38, 38], col: '#7a5634', snap: 8 },
+  { name: 'birch log', tex: [40, 39, 40], col: '#d9d4c4', snap: 6 },
+  { name: 'birch leaves', tex: [41, 41, 41], opaque: false, cutout: true, col: '#7fae4a', snap: 7 },
+  { name: 'cactus', tex: [43, 42, 43], opaque: true, col: '#4f8a34', snap: 7 },
+  { name: 'red sand', tex: [44, 44, 44], col: '#c46a32', snap: 10 },
+  { name: 'terracotta', tex: [45, 45, 45], col: '#b5603a', snap: 10 },
+  { name: 'white terracotta', tex: [46, 46, 46], col: '#d8c0a8', snap: 5 },
+  { name: 'brown terracotta', tex: [47, 47, 47], col: '#7d4a33', snap: 10 },
+  { name: 'sandstone', tex: [49, 48, 49], col: '#dcca92', snap: 5 },
+  { name: 'cut sandstone', tex: [49, 50, 49], col: '#e0cf98', snap: 5 },
+  { name: 'mud', tex: [51, 51, 51], col: '#4a3c30', snap: 2 },
+  { name: 'mud brick', tex: [52, 52, 52], col: '#8f7356', snap: 10 },
+  { name: 'swamp grass', tex: [53, 54, 2], col: '#55663a', snap: 1 },
+  { name: 'red flower', tex: [55, 55, 55], solid: false, opaque: false, shape: 'cross', col: '#6c9a3f', snap: 1, decor: true },
+  { name: 'yellow flower', tex: [56, 56, 56], solid: false, opaque: false, shape: 'cross', col: '#6c9a3f', snap: 1, decor: true },
+  { name: 'tall grass', tex: [57, 57, 57], solid: false, opaque: false, shape: 'cross', col: '#6c9a3f', snap: 1, decor: true },
+  { name: 'dead bush', tex: [58, 58, 58], solid: false, opaque: false, shape: 'cross', col: '#d8c48c', snap: 5, decor: true },
+  { name: 'reeds', tex: [59, 59, 59], solid: false, opaque: false, shape: 'cross', col: '#55663a', snap: 1, decor: true },
+  { name: 'vine', tex: [60, 60, 60], solid: false, opaque: false, shape: 'cross', col: '#3f6a2a', snap: 7, decor: true },
+  { name: 'jungle log', tex: [62, 61, 62], col: '#5a4426', snap: 6 },
+  { name: 'jungle leaves', tex: [63, 63, 63], opaque: false, cutout: true, col: '#2f7a26', snap: 7 },
+  { name: 'ice', tex: [64, 64, 64], col: '#9cc4e8', snap: 4 },
+  { name: 'stained glass', tex: [65, 65, 65], opaque: false, cutout: true, col: '#8a5ab0', snap: 14 },
+  { name: 'clock', tex: [30, 66, 30], col: '#e8e0c8', snap: 11 },
+  { name: 'gold block', tex: [67, 67, 67], light: 4, col: '#f0c838', snap: 14 },
+  { name: 'dark planks', tex: [68, 68, 68], col: '#4a3222', snap: 8 },
+  { name: 'mossy cobble', tex: [69, 69, 69], col: '#6f7d5a', snap: 3 },
+  { name: 'marble', tex: [70, 71, 70], col: '#ecebe4', snap: 12 },
+  { name: 'copper roof', tex: [72, 72, 72], col: '#5fa08a', snap: 11 },
+  { name: 'lantern', tex: [73, 73, 73], opaque: false, cutout: true, light: 13, col: '#ffd060', snap: 14 },
 ];
 BLOCKS.forEach((b, i) => {
   b.id = i;
@@ -99,22 +136,30 @@ function makeNoise(rng) {
 }
 
 // ---------- village identities ----------
+// every settlement has a biome and builds in its own style:
+//   style.wood / style.stone / style.fine: wall materials by wealth, corner: posts, roofs + roofShape, ground: the soil they live on
 const VILLAGES = [
-  { id: 'highvale', name: 'Highvale', cx: 100, cz: 46, r: 32, plaza: 17, theme: 'Politics \u00B7 education \u00B7 learning',
-    walls: [B.PLASTER, B.BRICK, B.PLASTER, B.STONE_BRICK], roofs: [B.SLATE, B.SLATE, B.ROOF_TILE], plazaBlock: B.COBBLE, houses: 13, extra: ['academy'], color: '#8bb3d1' },
-  { id: 'ironridge', name: 'Ironridge', cx: 172, cz: 68, r: 27, plaza: 13, theme: 'Mining \u00B7 industry \u00B7 wealth',
-    walls: [B.COBBLE, B.STONE_BRICK, B.BRICK], roofs: [B.SLATE], plazaBlock: B.STONE_BRICK, houses: 12, extra: [], color: '#c9a24a' },
-  { id: 'rivergate', name: 'Rivergate', cx: 172, cz: 160, r: 27, plaza: 15, theme: 'Trade \u00B7 merchants \u00B7 information',
-    walls: [B.BRICK, B.PLASTER, B.BRICK], roofs: [B.ROOF_TILE], plazaBlock: B.COBBLE, houses: 12, extra: ['stalls'], color: '#e07a5a' },
-  { id: 'greenhollow', name: 'Greenhollow', cx: 48, cz: 156, r: 29, plaza: 13, theme: 'Agriculture \u00B7 tradition \u00B7 cooperation',
-    walls: [B.PLANKS, B.PLASTER], roofs: [B.THATCH, B.THATCH, B.ROOF_TILE], plazaBlock: B.PATH, houses: 12, extra: [], color: '#7d9b52' },
-  { id: 'ashfield', name: 'Ashfield', cx: 36, cz: 64, r: 26, plaza: 11, theme: 'Poor \u00B7 chaotic \u00B7 lawless',
-    walls: [B.PLANKS, B.COBBLE, B.PLANKS], roofs: [B.PLANKS, B.SLATE], plazaBlock: B.PATH, houses: 12, extra: [], color: '#a0603a' },
+  { id: 'highvale', name: 'Highvale', cx: SP(100), cz: SP(46), r: 40, plaza: 19, theme: 'Politics \u00B7 education \u00B7 learning', biome: 'snow',
+    walls: [B.SPRUCE_PLANKS, B.STONE_BRICK, B.SPRUCE_PLANKS, B.PLASTER], roofs: [B.SLATE, B.DARK_PLANKS, B.SLATE], plazaBlock: B.COBBLE, houses: 13, extra: ['academy'], color: '#8bb3d1',
+    style: { wood: B.SPRUCE_PLANKS, stone: B.STONE_BRICK, fine: B.PLASTER, corner: B.SPRUCE_LOG, trim: B.DARK_PLANKS, roofs: [B.SLATE, B.DARK_PLANKS], roofShape: 'steep', ground: B.SNOWY_GRASS, accent: B.COPPER_ROOF } },
+  { id: 'ironridge', name: 'Ironridge', cx: SP(172), cz: SP(68), r: 34, plaza: 15, theme: 'Mining \u00B7 industry \u00B7 wealth', biome: 'badlands',
+    walls: [B.TERRACOTTA, B.COBBLE, B.STONE_BRICK, B.WHITE_TERRACOTTA], roofs: [B.SLATE, B.DARK_PLANKS], plazaBlock: B.STONE_BRICK, houses: 12, extra: [], color: '#c9a24a',
+    style: { wood: B.DARK_PLANKS, stone: B.TERRACOTTA, fine: B.WHITE_TERRACOTTA, corner: B.STONE_BRICK, trim: B.BROWN_TERRACOTTA, roofs: [B.SLATE, B.DARK_PLANKS], roofShape: 'hip', ground: B.RED_SAND, accent: B.GOLD_BLOCK } },
+  { id: 'rivergate', name: 'Rivergate', cx: SP(172), cz: SP(160), r: 34, plaza: 17, theme: 'Trade \u00B7 merchants \u00B7 information', biome: 'swamp',
+    walls: [B.MUD_BRICK, B.PLANKS, B.BRICK, B.PLASTER], roofs: [B.ROOF_TILE, B.THATCH], plazaBlock: B.COBBLE, houses: 12, extra: ['stalls'], color: '#e07a5a',
+    style: { wood: B.PLANKS, stone: B.MUD_BRICK, fine: B.BRICK, corner: B.DARK_PLANKS, trim: B.PLASTER, roofs: [B.ROOF_TILE, B.THATCH], roofShape: 'gable', ground: B.SWAMP_GRASS, accent: B.COPPER_ROOF } },
+  { id: 'greenhollow', name: 'Greenhollow', cx: SP(48), cz: SP(156), r: 36, plaza: 15, theme: 'Agriculture \u00B7 tradition \u00B7 cooperation', biome: 'meadow',
+    walls: [B.PLANKS, B.PLASTER], roofs: [B.THATCH, B.THATCH, B.ROOF_TILE], plazaBlock: B.PATH, houses: 12, extra: [], color: '#7d9b52',
+    style: { wood: B.PLANKS, stone: B.PLASTER, fine: B.BRICK, corner: B.LOG, trim: B.LOG, roofs: [B.THATCH, B.ROOF_TILE], roofShape: 'gable', ground: B.GRASS, accent: B.ROOF_TILE } },
+  { id: 'ashfield', name: 'Ashfield', cx: SP(36), cz: SP(64), r: 33, plaza: 13, theme: 'Poor \u00B7 chaotic \u00B7 lawless', biome: 'desert',
+    walls: [B.SANDSTONE, B.MUD_BRICK, B.SANDSTONE], roofs: [B.CUT_SANDSTONE], plazaBlock: B.PATH, houses: 12, extra: [], color: '#a0603a',
+    style: { wood: B.MUD_BRICK, stone: B.SANDSTONE, fine: B.CUT_SANDSTONE, corner: B.CUT_SANDSTONE, trim: B.TERRACOTTA, roofs: [B.CUT_SANDSTONE], roofShape: 'flat', ground: B.SAND, accent: B.GOLD_BLOCK } },
 ];
 const VBY = {}; VILLAGES.forEach(v => { VBY[v.id] = v; });
-const CROSS = [106, 104];
-const riverX = z => Math.round(137 + 4 * Math.sin(z * 0.045) + 2 * Math.sin(z * 0.13));
-const MOUNTAIN = { x: 184, z: 20, r: 40, h: 18 };
+const CROSS = [SP(106), SP(104)];
+const riverX = z => Math.round(SP(137) + 6 * Math.sin(z * 0.03) + 3 * Math.sin(z * 0.087));
+const MOUNTAIN = { x: SP(184), z: SP(20), r: 64, h: 30 };
+const LAKE = { x: 150, z: 286, rx: 34, rz: 20 };
 
 // ---------- generation state ----------
 const places = {};
@@ -138,10 +183,20 @@ function isFree(x0, z0, w, d, m) {
   return true;
 }
 function topSolid(x, z) { for (let y = H - 1; y >= 0; y--) { const b = get(x, y, z); if (b && BLOCKS[b].solid) return y; } return -1; }
-function fillColumn(x, z, h, topBlock) {
+// biome of every column, decided once per world
+const BIOMES = ['meadow', 'snow', 'badlands', 'swamp', 'desert', 'jungle', 'mountain', 'lake'];
+const biomeMap = new Uint8Array(W * D);
+const biomeAt = (x, z) => (x < 0 || z < 0 || x >= W || z >= D) ? 'meadow' : BIOMES[biomeMap[x + z * W]];
+const GROUND_OF = { meadow: B.GRASS, snow: B.SNOWY_GRASS, badlands: B.RED_SAND, swamp: B.SWAMP_GRASS, desert: B.SAND, jungle: B.GRASS, mountain: B.GRASS, lake: B.SAND };
+const groundAt = (x, z) => GROUND_OF[biomeAt(x, z)] || B.GRASS;
+// badlands cliffs show coloured bands
+const BAND = (y) => [B.TERRACOTTA, B.WHITE_TERRACOTTA, B.TERRACOTTA, B.BROWN_TERRACOTTA, B.RED_SAND, B.TERRACOTTA, B.WHITE_TERRACOTTA][((y % 7) + 7) % 7];
+function fillColumn(x, z, h, topBlock, sub) {
   for (let y = 0; y < H; y++) {
     let b = 0;
-    if (y < h - 2) b = B.STONE; else if (y < h) b = B.DIRT; else if (y === h) b = topBlock || B.GRASS;
+    if (y < h - 2 && !(sub === 'band' && y >= GROUND - 2)) b = B.STONE;
+    else if (y < h) b = sub === 'band' ? BAND(y) : (sub || B.DIRT);
+    else if (y === h) b = topBlock || B.GRASS;
     data[idx(x, y, z)] = b;
   }
   heights[x + z * W] = h;
@@ -149,10 +204,11 @@ function fillColumn(x, z, h, topBlock) {
 function flatten(x0, z0, w, d, top, topBlock) {
   for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + d; z++) {
     if (x < 0 || z < 0 || x >= W || z >= D) continue;
+    const tb = topBlock || groundAt(x, z), sub = tb === B.SAND ? B.SANDSTONE : tb === B.RED_SAND ? B.TERRACOTTA : B.DIRT;
     for (let y = 1; y < H; y++) {
       if (y < top - 2) data[idx(x, y, z)] = B.STONE;
-      else if (y < top) data[idx(x, y, z)] = B.DIRT;
-      else if (y === top) data[idx(x, y, z)] = topBlock || B.GRASS;
+      else if (y < top) data[idx(x, y, z)] = sub;
+      else if (y === top) data[idx(x, y, z)] = tb;
       else data[idx(x, y, z)] = 0;
     }
     heights[x + z * W] = top;
@@ -160,6 +216,58 @@ function flatten(x0, z0, w, d, top, topBlock) {
 }
 
 // ---------- buildings ----------
+// roof cells over a w x d footprint whose walls end at `top`: gable, steep, hip, flat (parapet), dome, spire
+function roofCells(x, z, w, d, top, shape, roof, wall, trim) {
+  const out = [];
+  const put = (i, y, k, b) => out.push([i, y, k, b]);
+  shape = shape || 'gable';
+  if (shape === 'flat') {
+    for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) put(i, top, k, roof);
+    for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) {
+      const edge = i === x || i === x + w - 1 || k === z || k === z + d - 1; if (!edge) continue;
+      put(i, top + 1, k, trim || wall);
+      if ((i + k) % 2 === 0 && ((i === x || i === x + w - 1) && (k === z || k === z + d - 1) || (i + k) % 4 === 0)) put(i, top + 2, k, trim || wall);
+    }
+    return out;
+  }
+  if (shape === 'hip' || shape === 'spire') {
+    const rise = shape === 'spire' ? 2 : 1;
+    for (let lvl = 0; ; lvl++) {
+      const x0 = x - 1 + lvl, z0 = z - 1 + lvl, x1 = x + w - lvl, z1 = z + d - lvl;
+      if (x0 > x1 || z0 > z1) break;
+      for (let r = 0; r < rise; r++) {
+        const y = top + lvl * rise + r;
+        for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) if (i === x0 || i === x1 || k === z0 || k === z1 || x1 - x0 < 2 || z1 - z0 < 2) put(i, y, k, roof);
+      }
+      if (x1 - x0 < 2 || z1 - z0 < 2) break;
+    }
+    return out;
+  }
+  if (shape === 'dome') {
+    const cx = x + (w - 1) / 2, cz = z + (d - 1) / 2, R = Math.min(w, d) / 2 + 0.3;
+    for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) for (let y = 0; y <= Math.ceil(R); y++) {
+      const r = Math.hypot(i - cx, y * 1.05, k - cz);
+      if (r <= R && r > R - 1.25) put(i, top + y, k, roof);
+    }
+    for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) put(i, top, k, roof);
+    return out;
+  }
+  // gable (and steep: two blocks of rise per step)
+  const rise = shape === 'steep' ? 2 : 1;
+  const alongX = w >= d; const L = alongX ? w : d, Sh = alongX ? d : w;
+  for (let lvl = 0; ; lvl++) {
+    const a = lvl - 1, b = Sh - lvl; if (a > b) break;
+    for (let r = 0; r < rise; r++) {
+      const y = top + lvl * rise + r;
+      for (let t = -1; t <= L; t++) {
+        for (const sIdx of (a === b ? [a] : [a, b])) put(alongX ? x + t : x + sIdx, y, alongX ? z + sIdx : z + t, roof);
+        if (t === 0 || t === L - 1) for (let sIdx = a + 1; sIdx < b; sIdx++) put(alongX ? x + t : x + sIdx, y, alongX ? z + sIdx : z + t, wall === B.GLASS ? B.PLANKS : wall);
+      }
+    }
+    if (a === b || a + 1 === b) break;
+  }
+  return out;
+}
 function building(spec) {
   const { x, z, w, d } = spec;
   const wallH = spec.wallH || 4;
@@ -186,24 +294,7 @@ function building(spec) {
     }
   }
   data[idx(dx, STAND, dz)] = B.DOOR; data[idx(dx, STAND + 1, dz)] = B.DOOR;
-  const alongX = w >= d;
-  const L = alongX ? w : d, Sh = alongX ? d : w;
-  for (let lvl = 0; ; lvl++) {
-    const a = lvl - 1, b = Sh - lvl;
-    if (a > b) break;
-    const y = top + lvl;
-    for (let t = -1; t <= L; t++) {
-      for (const s of (a === b ? [a] : [a, b])) {
-        const px = alongX ? x + t : x + s, pz = alongX ? z + s : z + t;
-        if (inb(px, y, pz)) data[idx(px, y, pz)] = spec.roof;
-      }
-      if (t === 0 || t === L - 1) for (let s = a + 1; s < b; s++) {
-        const px = alongX ? x + t : x + s, pz = alongX ? z + s : z + t;
-        if (inb(px, y, pz)) data[idx(px, y, pz)] = spec.wall === B.GLASS ? B.PLANKS : spec.wall;
-      }
-    }
-    if (a === b || a + 1 === b) break;
-  }
+  for (const [i, y, k, b] of roofCells(x, z, w, d, top, spec.roofShape, spec.roof, spec.wall, spec.trim)) if (inb(i, y, k)) data[idx(i, y, k)] = b;
   const out = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] }[spec.door];
   const entry = [dx + out[0], dz + out[1]];
   data[idx(entry[0], GROUND, entry[1])] = B.PATH;
@@ -260,20 +351,56 @@ function furnish(rec) {
 }
 
 // ---------- terrain features ----------
-function tree(x, z, rng, dead) {
+// trees: each returns its blocks in the order they come down (leaves first, then the trunk from the top)
+const GROWS = new Set([B.GRASS, B.DIRT, B.SNOWY_GRASS, B.SWAMP_GRASS, B.SAND, B.RED_SAND, B.SNOW]);
+function setIf(x, y, z, b, list) { if (inb(x, y, z) && data[idx(x, y, z)] === 0) { data[idx(x, y, z)] = b; list.push([x, y, z, b]); return true; } return false; }
+function trunk(x, z, h, th, log, logs) { for (let y = h + 1; y <= h + th; y++) { data[idx(x, y, z)] = log; logs.push([x, y, z, log]); } }
+function tree(x, z, rng, kind) {
   const h = topSolid(x, z); const g = get(x, h, z);
-  if (g !== B.GRASS && g !== B.DIRT) return null;
-  const th = dead ? 3 + Math.floor(rng() * 2) : 4 + Math.floor(rng() * 3);
+  if (!GROWS.has(g) || h > H - 20) return null;
   const logs = [], leaves = [];
-  for (let y = h + 1; y <= h + th; y++) { data[idx(x, y, z)] = B.LOG; logs.push([x, y, z, B.LOG]); }
-  if (dead) { if (rng() < 0.6) { const y = h + th - 1, dx = rng() < .5 ? 1 : -1; if (inb(x + dx, y, z) && !data[idx(x + dx, y, z)]) { data[idx(x + dx, y, z)] = B.LOG; logs.push([x + dx, y, z, B.LOG]); } } }
-  else for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -2; dy <= 1; dy++) {
-    const r = Math.abs(dx) + Math.abs(dz) + Math.abs(dy + 0.5);
-    if (r > 3.6 || (dy === 1 && Math.abs(dx) + Math.abs(dz) > 1)) continue;
-    const px = x + dx, py = h + th + dy, pz = z + dz;
-    if (inb(px, py, pz) && data[idx(px, py, pz)] === 0 && rng() > 0.08) { data[idx(px, py, pz)] = B.LEAVES; leaves.push([px, py, pz, B.LEAVES]); }
+  kind = kind || 'oak';
+  if (kind === 'dead') {
+    const th = 3 + Math.floor(rng() * 2); trunk(x, z, h, th, B.LOG, logs);
+    if (rng() < 0.6) { const dx = rng() < .5 ? 1 : -1; setIf(x + dx, h + th - 1, z, B.LOG, logs); }
+  } else if (kind === 'cactus') {
+    const th = 2 + Math.floor(rng() * 2); trunk(x, z, h, th, B.CACTUS, logs);
+  } else if (kind === 'spruce') {
+    const th = 6 + Math.floor(rng() * 4); trunk(x, z, h, th, B.SPRUCE_LOG, logs);
+    // tiers of a cone, wide at the bottom
+    for (let y = h + 3; y <= h + th + 1; y++) {
+      const fromTop = h + th + 1 - y; const r = fromTop === 0 ? 0 : Math.min(3, 1 + (fromTop >> 1) - ((y - h) % 2 === 0 ? 1 : 0));
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (Math.abs(dx) + Math.abs(dz) <= r + 1 && (dx || dz || y > h + th)) setIf(x + dx, y, z + dz, B.SPRUCE_LEAVES, leaves);
+    }
+    setIf(x, h + th + 2, z, B.SNOW, leaves);
+  } else if (kind === 'birch') {
+    const th = 5 + Math.floor(rng() * 3); trunk(x, z, h, th, B.BIRCH_LOG, logs);
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -2; dy <= 1; dy++) {
+      const r = Math.abs(dx) + Math.abs(dz) + Math.abs(dy + 0.5); if (r > 3.2 || (dy === 1 && Math.abs(dx) + Math.abs(dz) > 1)) continue;
+      if (rng() > 0.1) setIf(x + dx, h + th + dy, z + dz, B.BIRCH_LEAVES, leaves);
+    }
+  } else if (kind === 'jungle') {
+    // a 2x2 giant with a wide canopy and hanging vines
+    const th = 11 + Math.floor(rng() * 5);
+    for (const [ox, oz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { if (get(x + ox, h, z + oz) === 0) data[idx(x + ox, h, z + oz)] = B.DIRT; trunk(x + ox, z + oz, h, th, B.JUNGLE_LOG, logs); }
+    for (let dy = -2; dy <= 1; dy++) { const R = dy === 1 ? 2 : dy === -2 ? 3 : 4; for (let dx = -R; dx <= R + 1; dx++) for (let dz = -R; dz <= R + 1; dz++) { const ddx = dx - 0.5, ddz = dz - 0.5; if (ddx * ddx + ddz * ddz > R * R + 1 || rng() < 0.08) continue; setIf(x + dx, h + th + dy, z + dz, B.JUNGLE_LEAVES, leaves); } }
+    for (let k = 0; k < 8; k++) { const a = rng() * Math.PI * 2, vx = x + Math.round(Math.cos(a) * 4), vz = z + Math.round(Math.sin(a) * 4); for (let y = h + th - 3; y > h + th - 3 - (2 + Math.floor(rng() * 4)); y--) if (!setIf(vx, y, vz, B.VINE, leaves)) break; }
+  } else if (kind === 'palm') {
+    const th = 6 + Math.floor(rng() * 2); trunk(x, z, h, th, B.JUNGLE_LOG, logs);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { setIf(x + dx, h + th, z + dz, B.JUNGLE_LEAVES, leaves); setIf(x + dx * 2, h + th, z + dz * 2, B.JUNGLE_LEAVES, leaves); setIf(x + dx * 3, h + th - 1, z + dz * 3, B.JUNGLE_LEAVES, leaves); }
+    setIf(x, h + th + 1, z, B.JUNGLE_LEAVES, leaves);
+  } else {
+    // oak, and the swamp oak: wider, lower, with vines
+    const swamp = kind === 'swamp';
+    const th = swamp ? 4 + Math.floor(rng() * 2) : 4 + Math.floor(rng() * 3); trunk(x, z, h, th, B.LOG, logs);
+    const R = swamp ? 3 : 2;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) for (let dy = -2; dy <= 1; dy++) {
+      const r = Math.abs(dx) + Math.abs(dz) + Math.abs(dy + 0.5);
+      if (r > R + 1.6 || (dy === 1 && Math.abs(dx) + Math.abs(dz) > 1)) continue;
+      if (rng() > 0.08) setIf(x + dx, h + th + dy, z + dz, B.LEAVES, leaves);
+    }
+    if (swamp) for (let k = 0; k < 5; k++) { const vx = x + (rng() < .5 ? -R : R), vz = z + Math.floor(rng() * (2 * R + 1)) - R; for (let y = h + th - 2; y > h + th - 5; y--) if (!setIf(vx, y, vz, B.VINE, leaves)) break; }
   }
-  // chopping removes leaves first, then the trunk from the top down
   return logs.concat(leaves).reverse();
 }
 function drawRoad(x0, z0, x1, z1, block) {
@@ -349,12 +476,12 @@ const TAVERN_NAMES = { highvale: 'The Crooked Lantern', ironridge: 'The Anvil & 
 const PAPER_HOUSE = { highvale: 'Village Post Office', ironridge: 'Ledger Office', rivergate: 'Courier House', greenhollow: 'Almanac Office', ashfield: 'Rag Shack' };
 
 function generateVillage(v, rng) {
-  const ground = v.id === 'ashfield' ? B.DIRT : B.GRASS;
+  const ground = v.style.ground;
   // flat disc
   for (let x = v.cx - v.r - 2; x <= v.cx + v.r + 2; x++) for (let z = v.cz - v.r - 2; z <= v.cz + v.r + 2; z++) {
     if (x < 0 || z < 0 || x >= W || z >= D) continue;
     if (Math.hypot(x - v.cx, z - v.cz) > v.r + 2 || occupied[x + z * W] === 3) continue;
-    const top = v.id === 'ashfield' && rng() < 0.35 ? (rng() < 0.5 ? B.SAND : B.GRASS) : ground;
+    const top = v.id === 'ashfield' && rng() < 0.04 ? B.DIRT : ground;
     flatten(x, z, 1, 1, GROUND, top);
   }
   // plaza + well
@@ -363,7 +490,7 @@ function generateVillage(v, rng) {
   reserve(px0, pz0, P, P, 1);
   for (let x = v.cx - 1; x <= v.cx + 1; x++) for (let z = v.cz - 1; z <= v.cz + 1; z++) {
     if (x === v.cx && z === v.cz) { data[idx(x, GROUND, z)] = B.WATER; data[idx(x, GROUND - 1, z)] = B.WATER; }
-    else data[idx(x, STAND, z)] = v.id === 'ashfield' ? B.COBBLE : B.STONE_BRICK;
+    else data[idx(x, STAND, z)] = v.id === 'ashfield' ? B.SANDSTONE : v.biome === 'badlands' ? B.TERRACOTTA : B.STONE_BRICK;
   }
   if (v.id !== 'ashfield') for (let x = v.cx - 1; x <= v.cx + 1; x++) for (let z = v.cz - 1; z <= v.cz + 1; z++) data[idx(x, STAND + 3, z)] = B.SLATE;
   if (v.id !== 'ashfield') for (const [x, z] of [[v.cx - 1, v.cz - 1], [v.cx + 1, v.cz + 1]]) { data[idx(x, STAND + 1, z)] = B.FENCE; data[idx(x, STAND + 2, z)] = B.FENCE; }
@@ -394,8 +521,8 @@ function generateVillage(v, rng) {
     if (!lot) lot = placeAround(v, w, d, { margin: 1, r: v.r + 5 });
     if (!lot) lot = placeAround(v, d, w, { margin: 1, r: v.r + 7 });
     if (!lot) continue;
-    const wall = kind === 'townhall' ? (v.id === 'ashfield' ? B.PLANKS : v.id === 'greenhollow' ? B.PLASTER : B.STONE_BRICK) : kind === 'forge' || kind === 'guard' ? B.COBBLE : v.walls[Math.floor(rng() * v.walls.length)];
-    const rec = building({ id: v.id + '_' + kind, vid: v.id, kind, name: kind === 'tavern' ? TAVERN_NAMES[v.id] : kind === 'post' ? PAPER_HOUSE[v.id] : nm, x: lot.x, z: lot.z, w: lot.w, d: lot.d, wallH: v.id === 'ashfield' ? 4 : wallH, wall, roof: v.roofs[Math.floor(rng() * v.roofs.length)], door: lot.door, floor: kind === 'forge' || kind === 'guard' ? B.COBBLE : B.PLANKS, trim: kind === 'townhall' && v.id !== 'ashfield' ? B.PLASTER : null, ground });
+    const wall = kind === 'townhall' ? (v.id === 'ashfield' ? B.CUT_SANDSTONE : v.id === 'greenhollow' ? B.PLASTER : v.id === 'ironridge' ? B.WHITE_TERRACOTTA : B.STONE_BRICK) : kind === 'forge' || kind === 'guard' ? (v.id === 'ashfield' ? B.SANDSTONE : B.COBBLE) : v.walls[Math.floor(rng() * v.walls.length)];
+    const rec = building({ id: v.id + '_' + kind, vid: v.id, kind, name: kind === 'tavern' ? TAVERN_NAMES[v.id] : kind === 'post' ? PAPER_HOUSE[v.id] : nm, x: lot.x, z: lot.z, w: lot.w, d: lot.d, wallH: v.id === 'ashfield' ? 4 : wallH, wall, roof: v.roofs[Math.floor(rng() * v.roofs.length)], roofShape: kind === 'townhall' && v.style.roofShape === 'gable' ? 'hip' : v.style.roofShape, corner: v.style.corner, door: lot.door, floor: kind === 'forge' || kind === 'guard' ? B.COBBLE : B.PLANKS, trim: kind === 'townhall' ? v.style.trim : null, ground });
     furnish(rec);
     pathTo(rec.entry, v.cx, v.cz, v.plazaBlock === B.PATH ? B.PATH : v.plazaBlock);
   }
@@ -406,7 +533,7 @@ function generateVillage(v, rng) {
     const lot = placeAround(v, w, d, { margin: 1, rng, jitter: 9, minDist: 6, r: v.r + 9 });
     if (!lot) continue;
     n++;
-    const rec = building({ id: v.id + '_house' + n, vid: v.id, kind: 'house', name: v.name + ' house ' + n, x: lot.x, z: lot.z, w: lot.w, d: lot.d, wall: v.walls[Math.floor(rng() * v.walls.length)], roof: v.roofs[Math.floor(rng() * v.roofs.length)], door: lot.door, ground });
+    const rec = building({ id: v.id + '_house' + n, vid: v.id, kind: 'house', name: v.name + ' house ' + n, x: lot.x, z: lot.z, w: lot.w, d: lot.d, wall: v.walls[Math.floor(rng() * v.walls.length)], roof: v.roofs[Math.floor(rng() * v.roofs.length)], roofShape: v.style.roofShape === 'gable' && rng() < 0.3 ? 'hip' : v.style.roofShape, corner: v.style.corner, door: lot.door, ground });
     furnish(rec);
     pathTo(rec.entry, v.cx, v.cz, B.PATH);
   }
@@ -455,21 +582,53 @@ function generate(seed) {
   for (const k in places) delete places[k];
   const rng = mulberry32(seed || 4242);
   const noise = makeNoise(rng);
-  // terrain: gentle hills between settlements, a mountain to the north-east
+  // biomes: each settlement's land around it, warped so the borders wander; a mountain range, a lake and a jungle
   for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) {
+    let bio;
+    const lk = ((x - LAKE.x) / LAKE.rx) ** 2 + ((z - LAKE.z) / LAKE.rz) ** 2;
+    const md = Math.hypot(x - MOUNTAIN.x, (z - MOUNTAIN.z) * 1.1);
+    if (lk < 1.35) bio = 'lake';
+    else if (md < MOUNTAIN.r * 0.8) bio = 'mountain';
+    else {
+      let best = null, bd = 1e9;
+      for (const v of VILLAGES) { const dd = Math.hypot(x - v.cx, z - v.cz) + (noise(x / 26 + v.cx, z / 26 + 7) - 0.5) * 60; if (dd < bd) { bd = dd; best = v; } }
+      bio = best.biome;
+      if (bd > 70 && z > 238 && x < 136) bio = 'jungle';
+      else if (z < 30 + noise(x / 18, 3) * 14 && bio !== 'badlands') bio = 'snow';
+    }
+    biomeMap[x + z * W] = BIOMES.indexOf(bio);
+  }
+  // terrain: hills between settlements shaped by the biome, the mountain to the north-east
+  const AMP = { meadow: 6, snow: 10, badlands: 4, swamp: 1.2, desert: 3, jungle: 8, mountain: 8, lake: 0 };
+  for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) {
+    const bio = BIOMES[biomeMap[x + z * W]];
     let near = 1e9;
     for (const v of VILLAGES) near = Math.min(near, Math.hypot(x - v.cx, z - v.cz) - v.r);
-    let h = GROUND;
-    const hill = noise(x / 14, z / 14) * 7 + noise(x / 5 + 50, z / 5) * 2 - 3.2;
-    const fade = Math.max(0, Math.min(1, (near - 4) / 14));
-    h += Math.max(0, Math.round(hill * fade));
-    const md = Math.hypot(x - MOUNTAIN.x, (z - MOUNTAIN.z) * 1.1);
-    if (md < MOUNTAIN.r) h = Math.max(h, GROUND + Math.round((1 - md / MOUNTAIN.r) * MOUNTAIN.h + noise(x / 4, z / 4) * 2));
-    const hd = Math.hypot(x - 80, z - 6);
-    if (hd < 15) h = Math.max(h, GROUND + Math.round((1 - hd / 15) * 9 + noise(x / 4 + 9, z / 4) * 1.5));
-    let top = B.GRASS;
-    if (Math.hypot(x - 36, z - 64) < 46 && noise(x / 6 + 90, z / 6) > 0.55) top = B.DIRT;
-    fillColumn(x, z, Math.min(h, H - 6), top);
+    const fade = Math.max(0, Math.min(1, (near - 4) / 18));
+    const amp = AMP[bio];
+    let h = GROUND + Math.max(0, Math.round((noise(x / 21, z / 21) * amp + noise(x / 7 + 50, z / 7) * 2 - amp * 0.45) * fade));
+    if (bio === 'badlands') { const m = noise(x / 15 + 200, z / 15 + 20); if (m > 0.58) h = Math.max(h, GROUND + Math.round((5 + (m - 0.58) * 30) * fade)); }
+    if (bio === 'desert') h += Math.round(noise(x / 9 + 300, z / 9) * 2.2 * fade);
+    const mdd = Math.hypot(x - MOUNTAIN.x, (z - MOUNTAIN.z) * 1.1);
+    if (mdd < MOUNTAIN.r) h = Math.max(h, GROUND + Math.round((1 - mdd / MOUNTAIN.r) * MOUNTAIN.h + noise(x / 4, z / 4) * 3));
+    const hd = Math.hypot(x - SP(80), z - SP(6));
+    if (hd < 22) h = Math.max(h, GROUND + Math.round((1 - hd / 22) * 12 + noise(x / 4 + 9, z / 4) * 1.5));
+    h = Math.min(h, H - 8);
+    let top = GROUND_OF[bio], sub = B.DIRT;
+    if (bio === 'desert') sub = B.SANDSTONE;
+    if (bio === 'badlands') sub = 'band';
+    if (bio === 'snow' && h > GROUND + 7) top = B.SNOW;
+    if (bio === 'mountain') { top = h > GROUND + 20 ? B.SNOW : h > GROUND + 9 ? B.STONE : B.GRASS; if (top === B.STONE) sub = B.STONE; }
+    if (bio === 'swamp' && fade > 0.5 && noise(x / 6 + 400, z / 6) > 0.64) { fillColumn(x, z, GROUND - 1, B.MUD); data[idx(x, GROUND, z)] = B.WATER; heights[x + z * W] = GROUND; occupied[x + z * W] = 3; continue; }
+    if (bio === 'swamp' && noise(x / 5 + 90, z / 5) > 0.7) top = B.MUD;
+    fillColumn(x, z, h, top, sub);
+  }
+  // the lake, with sandy shores
+  for (let x = LAKE.x - LAKE.rx - 3; x <= LAKE.x + LAKE.rx + 3; x++) for (let z = LAKE.z - LAKE.rz - 3; z <= LAKE.z + LAKE.rz + 3; z++) {
+    if (x < 0 || z < 0 || x >= W || z >= D) continue;
+    const lk = ((x - LAKE.x) / LAKE.rx) ** 2 + ((z - LAKE.z) / LAKE.rz) ** 2 + (noise(x / 5, z / 5 + 60) - 0.5) * 0.25;
+    if (lk < 1) { const deep = Math.max(1, Math.round((1 - lk) * 5)); for (let y = 1; y < H; y++) data[idx(x, y, z)] = y < GROUND - deep - 1 ? B.STONE : y < GROUND - deep ? B.SAND : y < GROUND ? B.WATER : 0; heights[x + z * W] = GROUND - deep; occupied[x + z * W] = 3; }
+    else if (lk < 1.35) flatten(x, z, 1, 1, GROUND, B.SAND);
   }
   // river with sand banks
   for (let z = 0; z < D; z++) {
@@ -489,7 +648,7 @@ function generate(seed) {
   }
   // roads: every village to the crossroads
   for (const v of VILLAGES) drawRoad(v.cx, v.cz, CROSS[0], CROSS[1], B.PATH);
-  drawRoad(172, 68, 172, 160, B.PATH); // the river road between the mine town and the trading town
+  drawRoad(SP(172), SP(68), SP(172), SP(160), B.PATH); // the river road between the mine town and the trading town
   // bridge rails
   for (const [x, z] of roadCells) { const rx = riverX(z); if (x >= rx - 2 && x <= rx + 1) for (const dz of [-2, 2]) { const zz = z + dz; if (zz >= 0 && zz < D && data[idx(x, GROUND, zz)] === B.WATER) { data[idx(x, GROUND, zz)] = B.PLANKS; data[idx(x, STAND, zz)] = B.FENCE; } } }
   // crossroads signpost
@@ -507,39 +666,70 @@ function generate(seed) {
   // Ironridge mine: a tunnel north into the mountain with ore along the walls
   mine(ir, rng);
   // Highvale quarry in the north hill, Ashfield quarry pit
-  quarry(hv, 82, 14, 9, 5, rng);
-  const qa = siteAt(af, 250, 9, 7); quarry(af, qa[0], qa[1], 9, 7, rng, true);
+  quarry(hv, SP(82), SP(14), 9, 5, rng);
+  const qa = siteAt(af, 250, 13, 9); quarry(af, qa[0], qa[1], 13, 9, rng, true);
   // Rivergate: fishing pier and clay banks
   riverWorks(rg, rng);
+  // clay pits for the brick and terracotta towns
+  { const p1 = siteAt(ir, 200, 9, 7); clayPit(ir, p1[0], p1[1], 9, 7, B.TERRACOTTA, 'Red Clay Pit'); }
+  { const p2 = siteAt(af, 120, 9, 7); clayPit(af, p2[0], p2[1], 9, 7, B.CLAY, 'Mud Flats'); }
   // Greenhollow sheep pen
   const pp = siteAt(gh, 330, 9, 7); pen(gh, pp[0], pp[1]);
-  // trees and forests; each tree is a renewable wood node owned by the nearest village
-  const forests = [[34, 110, 20], [58, 10, 14], [10, 26, 16], [90, 180, 16], [198, 112, 16], [150, 38, 10], [130, 100, 12]];
-  for (let x = 2; x < W - 2; x++) for (let z = 2; z < D - 2; z++) {
+  // trees and forests by biome; each tree is a renewable wood node owned by the nearest village
+  // [chance in open land, chance in a forest patch, tree kinds]
+  const FLORA = { meadow: [0.006, 0.07, ['oak', 'oak', 'birch']], snow: [0.02, 0.09, ['spruce']], badlands: [0.002, 0.015, ['dead', 'oak']], swamp: [0.01, 0.06, ['swamp', 'swamp', 'oak']],
+    desert: [0.004, 0.004, ['cactus']], jungle: [0.03, 0.09, ['jungle', 'oak', 'jungle', 'palm']], mountain: [0.008, 0.04, ['spruce', 'spruce', 'oak']], lake: [0.003, 0.01, ['palm', 'birch']] };
+  const oasis = { x: VBY.ashfield.cx - 26, z: VBY.ashfield.cz + 44 };
+  for (let x = 2; x < W - 3; x++) for (let z = 2; z < D - 3; z++) {
     if (occupied[x + z * W]) continue;
     let near = false;
-    for (let dx = -2; dx <= 2 && !near; dx++) for (let dz = -2; dz <= 2; dz++) { const o = occupied[(x + dx) + (z + dz) * W]; if (o && o !== 4) { near = true; break; } }
+    for (let dx = -2; dx <= 3 && !near; dx++) for (let dz = -2; dz <= 3; dz++) { const o = occupied[(x + dx) + (z + dz) * W]; if (o && o !== 4) { near = true; break; } }
     if (near) continue;
-    let p = 0.01;
-    for (const [fx, fz, fr] of forests) { const d = Math.hypot(x - fx, z - fz); if (d < fr) p = Math.max(p, 0.1 * (1 - d / fr) + 0.02); }
     let inVillage = false; for (const v of VILLAGES) if (Math.hypot(x - v.cx, z - v.cz) < v.r + 3) inVillage = true;
     if (inVillage) continue;
-    if (rng() < p) {
-      let nv = null, nd = 1e9; for (const v of VILLAGES) { const d = Math.hypot(x - v.cx, z - v.cz); if (d < nd) { nd = d; nv = v; } }
-      const dead = nv.id === 'ashfield' && nd < 46 && rng() < 0.6;
-      const blocks = tree(x, z, rng, dead);
-      if (!blocks) continue;
-      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) if (x + dx >= 0 && z + dz >= 0 && x + dx < W && z + dz < D && !occupied[x + dx + (z + dz) * W]) occupied[x + dx + (z + dz) * W] = 4;
-      const spots = [[x + 1, z], [x - 1, z], [x, z + 1], [x, z - 1]];
-      addNode({ vid: nv.id, type: 'wood', spots, blocks, max: dead ? 6 : 12, regen: dead ? 0.4 : 1.6, mode: 'remove', dist: nd });
-    }
+    const bio = BIOMES[biomeMap[x + z * W]];
+    const F = FLORA[bio];
+    const patch = noise(x / 11 + 500, z / 11 + 500) > 0.62;
+    let p = patch ? F[1] : F[0];
+    let kind = F[2][Math.floor(rng() * F[2].length)];
+    // a palm oasis in the desert gives Ashfield its timber
+    if (Math.hypot(x - oasis.x, z - oasis.z) < 14) { p = 0.08; kind = rng() < 0.6 ? 'palm' : 'oak'; }
+    if (rng() >= p) continue;
+    if (kind === 'jungle' && (occupied[(x + 1) + z * W] || occupied[x + (z + 1) * W])) kind = 'oak';
+    let nv = null, nd = 1e9; for (const v of VILLAGES) { const d = Math.hypot(x - v.cx, z - v.cz); if (d < nd) { nd = d; nv = v; } }
+    const blocks = tree(x, z, rng, kind);
+    if (!blocks) continue;
+    const big = kind === 'jungle' ? 3 : 2;
+    for (let dx = -2; dx <= big; dx++) for (let dz = -2; dz <= big; dz++) if (x + dx >= 0 && z + dz >= 0 && x + dx < W && z + dz < D && !occupied[x + dx + (z + dz) * W]) occupied[x + dx + (z + dz) * W] = 4;
+    if (kind === 'cactus') continue; // cacti are scenery, not timber
+    const spots = kind === 'jungle' ? [[x + 2, z], [x - 1, z], [x, z + 2], [x, z - 1]] : [[x + 1, z], [x - 1, z], [x, z + 1], [x, z - 1]];
+    const dead = kind === 'dead';
+    addNode({ vid: nv.id, type: 'wood', spots, blocks, max: dead ? 6 : kind === 'jungle' ? 30 : 12, regen: dead ? 0.4 : 1.6, mode: 'remove', dist: nd });
+  }
+  // an oasis pond
+  for (let x = oasis.x - 3; x <= oasis.x + 3; x++) for (let z = oasis.z - 2; z <= oasis.z + 2; z++) if (Math.hypot(x - oasis.x, (z - oasis.z) * 1.4) < 3.2 && !occupied[x + z * W]) { flatten(x, z, 1, 1, GROUND - 1, B.SAND); data[idx(x, GROUND, z)] = B.WATER; occupied[x + z * W] = 3; }
+  // ground cover: flowers and grass in the meadows, reeds by the water, dead bushes in the dry lands
+  for (let x = 1; x < W - 1; x++) for (let z = 1; z < D - 1; z++) {
+    if (occupied[x + z * W]) continue;
+    let inVillage = false; for (const v of VILLAGES) if (Math.hypot(x - v.cx, z - v.cz) < v.r + 4) { inVillage = true; break; }
+    if (inVillage) continue;
+    const h = topSolid(x, z); if (h < 0 || h >= H - 2 || data[idx(x, h + 1, z)]) continue;
+    const g = data[idx(x, h, z)], bio = BIOMES[biomeMap[x + z * W]], r = rng();
+    let wet = false; for (const [a, c] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (get(x + a, h, z + c) === B.WATER || get(x + a, h - 1, z + c) === B.WATER) wet = true;
+    let deco = 0;
+    if (wet && (g === B.GRASS || g === B.SWAMP_GRASS || g === B.SAND || g === B.MUD) && r < 0.35) deco = B.REEDS;
+    else if (g === B.GRASS && bio === 'meadow') deco = r < 0.05 ? B.RED_FLOWER : r < 0.1 ? B.YELLOW_FLOWER : r < 0.22 ? B.TALL_GRASS : 0;
+    else if (g === B.GRASS && (bio === 'jungle' || bio === 'mountain')) deco = r < 0.18 ? B.TALL_GRASS : r < 0.2 ? B.RED_FLOWER : 0;
+    else if (g === B.SWAMP_GRASS) deco = r < 0.12 ? B.TALL_GRASS : 0;
+    else if ((g === B.SAND || g === B.RED_SAND) && (bio === 'desert' || bio === 'badlands')) deco = r < 0.02 ? B.DEAD_BUSH : 0;
+    if (deco) data[idx(x, h + 1, z)] = deco;
   }
   // leisure places near each village: the nearest forest edge and riverbank
   for (const v of VILLAGES) {
     const trees = nodes.filter(n => n.type === 'wood' && n.vid === v.id).sort((a, b) => a.dist - b.dist).slice(0, 6);
     if (trees.length) addPlace({ id: v.id + '_forest', vid: v.id, kind: 'forest', name: 'Woods near ' + v.name, spots: trees.map(t => t.spots[0]), entry: trees[0].spots[0], center: trees[0].spots[0] });
     const bank = [];
-    for (let z = v.cz - 30; z <= v.cz + 30; z += 6) { if (z < 0 || z >= D) continue; const bx = riverX(z) - 4; if (Math.abs(bx - v.cx) < 40) bank.push([bx, z]); }
+    for (let z = v.cz - 40; z <= v.cz + 40; z += 6) { if (z < 0 || z >= D) continue; const bx = riverX(z) - 4; if (Math.abs(bx - v.cx) < 60) bank.push([bx, z]); }
     if (bank.length) addPlace({ id: v.id + '_river', vid: v.id, kind: 'river', name: 'Riverbank', spots: bank, entry: bank[0], center: bank[0] });
   }
   // torches
@@ -576,14 +766,14 @@ function generate(seed) {
 
 function mine(v, rng) {
   // tunnel from the town's north edge into the mountain
-  const x0 = v.cx - 1, zTop = 8, zMouth = v.cz - v.r + 1;
+  const x0 = v.cx - 1, zMouth = v.cz - v.r + 1, zTop = zMouth - 40, G1 = zTop + 6, G2 = zTop + 16;
   const ore = { iron: [], coal: [], gold: [] }, spots = [];
   const cut = (x, z) => { data[idx(x, GROUND, z)] = B.STONE; for (let y = STAND; y < STAND + 3; y++) data[idx(x, y, z)] = 0; occupied[x + z * W] = 1; };
   for (let z = zTop; z <= zMouth; z++) for (let x = x0; x <= x0 + 1; x++) { cut(x, z); if (z < zMouth - 4) spots.push([x, z]); }
-  for (const gz of [14, 24]) for (let x = x0 - 12; x <= x0 + 13; x++) for (let z = gz; z <= gz + 1; z++) { cut(x, z); spots.push([x, z]); }
+  for (const gz of [G1, G2]) for (let x = x0 - 12; x <= x0 + 13; x++) for (let z = gz; z <= gz + 1; z++) { cut(x, z); spots.push([x, z]); }
   // timber supports + lights
   for (let z = zTop + 2; z < zMouth - 2; z += 5) { if (data[idx(x0, STAND + 3, z)]) for (let x = x0; x <= x0 + 1; x++) data[idx(x, STAND + 3, z)] = B.PLANKS; data[idx(x0 - 1, STAND + 1, z)] = data[idx(x0 - 1, STAND + 1, z)] ? B.TORCH : 0; }
-  for (const gz of [14, 24]) for (const x of [x0 - 10, x0 - 4, x0 + 5, x0 + 11]) if (data[idx(x, STAND + 1, gz - 1)]) data[idx(x, STAND + 1, gz - 1)] = B.TORCH;
+  for (const gz of [G1, G2]) for (const x of [x0 - 10, x0 - 4, x0 + 5, x0 + 11]) if (data[idx(x, STAND + 1, gz - 1)]) data[idx(x, STAND + 1, gz - 1)] = B.TORCH;
   // ore in the walls
   for (let x = x0 - 13; x <= x0 + 14; x++) for (let z = zTop - 1; z <= zMouth; z++) for (let y = STAND; y <= STAND + 2; y++) {
     const b = data[idx(x, y, z)];
@@ -592,20 +782,20 @@ function mine(v, rng) {
     for (const [a, c] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (inb(x + a, y, z + c) && data[idx(x + a, y, z + c)] === 0 && occupied[(x + a) + (z + c) * W] === 1) air = true;
     if (!air) continue;
     const r = rng();
-    const deep = z < 18;
+    const deep = z < zTop + 10;
     if (deep && r < 0.05) { data[idx(x, y, z)] = B.GOLD_ORE; ore.gold.push([x, y, z, B.GOLD_ORE]); }
     else if (r < 0.2) { data[idx(x, y, z)] = B.ORE; ore.iron.push([x, y, z, B.ORE]); }
     else if (r < 0.34) { data[idx(x, y, z)] = B.COAL_ORE; ore.coal.push([x, y, z, B.COAL_ORE]); }
   }
   for (const x of [x0 - 1, x0 + 2]) for (let y = STAND; y < STAND + 3; y++) data[idx(x, y, zMouth)] = B.LOG;
   for (let x = x0 - 1; x <= x0 + 2; x++) data[idx(x, STAND + 3, zMouth)] = B.PLANKS;
-  addPlace({ id: v.id + '_mine', vid: v.id, kind: 'mine', name: 'The Deep Seam', spots, entry: [x0, zMouth + 1], center: [x0, 20] });
+  addPlace({ id: v.id + '_mine', vid: v.id, kind: 'mine', name: 'The Deep Seam', spots, entry: [x0, zMouth + 1], center: [x0, zTop + 12] });
   addNode({ vid: v.id, type: 'iron', place: v.id + '_mine', spots: spots.slice(), blocks: ore.iron, max: ore.iron.length * 2, regen: 2, mode: 'swap', swap: B.STONE });
   addNode({ vid: v.id, type: 'coal', place: v.id + '_mine', spots: spots.slice(), blocks: ore.coal, max: ore.coal.length * 2, regen: 2, mode: 'swap', swap: B.STONE });
-  addNode({ vid: v.id, type: 'gold', place: v.id + '_mine', spots: spots.filter(s => s[1] < 20), blocks: ore.gold, max: Math.max(2, ore.gold.length), regen: 0.08, mode: 'swap', swap: B.STONE });
+  addNode({ vid: v.id, type: 'gold', place: v.id + '_mine', spots: spots.filter(s => s[1] < zTop + 12), blocks: ore.gold, max: Math.max(2, ore.gold.length), regen: 0.08, mode: 'swap', swap: B.STONE });
   const stone = [];
-  for (let x = x0 - 13; x <= x0 + 14; x++) for (let z = 12; z <= 27; z++) if (data[idx(x, STAND, z)] === B.STONE && occupied[x + z * W] !== 1) { let air = false; for (const [a, c] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (data[idx(x + a, STAND, z + c)] === 0) air = true; if (air) stone.push([x, STAND, z, B.STONE]); }
-  addNode({ vid: v.id, type: 'stone', place: v.id + '_mine', spots: spots.slice(), blocks: stone.slice(0, 60), max: 180, regen: 0, mode: 'remove' });
+  for (let x = x0 - 13; x <= x0 + 14; x++) for (let z = zTop + 4; z <= zTop + 19; z++) if (data[idx(x, STAND, z)] === B.STONE && occupied[x + z * W] !== 1) { let air = false; for (const [a, c] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (data[idx(x + a, STAND, z + c)] === 0) air = true; if (air) stone.push([x, STAND, z, B.STONE]); }
+  addNode({ vid: v.id, type: 'stone', place: v.id + '_mine', spots: spots.slice(), blocks: stone.slice(0, 60), max: 240, regen: 60, mode: 'remove' });
   pathTo([x0, zMouth + 1], v.cx, v.cz, B.STONE_BRICK);
 }
 function quarry(v, qx, qz, w, d, rng, pit) {
@@ -624,7 +814,8 @@ function quarry(v, qx, qz, w, d, rng, pit) {
     for (let y = GROUND - 1; y <= GROUND + 3; y++) { if (pit && y > GROUND) break; const b = get(x, y, z); if (b === B.STONE || b === B.DIRT || b === B.GRASS) { data[idx(x, y, z)] = B.STONE; blocks.push([x, y, z, B.STONE]); } }
   }
   addPlace({ id: v.id + '_quarry', vid: v.id, kind: 'quarry', name: v.name + ' Quarry', spots, entry: [qx + (w >> 1), qz + d], center: [qx + (w >> 1), qz + (d >> 1)] });
-  addNode({ vid: v.id, type: 'stone', place: v.id + '_quarry', spots, blocks, max: blocks.length * 2, regen: 0, mode: 'remove' });
+  // a quarry face keeps giving: new stone is cut deeper into the hill as the old face is used
+  addNode({ vid: v.id, type: 'stone', place: v.id + '_quarry', spots, blocks, max: Math.max(150, blocks.length * 3), regen: 60, mode: 'remove' });
   if (!pit && rng() < 2) { for (let k = 0; k < 4; k++) { const b = blocks[Math.floor(rng() * blocks.length)]; if (b) { data[idx(b[0], b[1], b[2])] = B.ORE; b[3] = B.ORE; } } }
   pathTo([qx + (w >> 1), qz + d], v.cx, v.cz, B.PATH);
 }
@@ -641,6 +832,20 @@ function riverWorks(v, rng) {
   for (const [x, z] of cspots) flatten(x, z, 1, 1, GROUND, B.SAND);
   addPlace({ id: v.id + '_claypits', vid: v.id, kind: 'claypits', name: 'Clay Banks', spots: cspots, entry: cspots[0], center: cspots[cspots.length >> 1] });
   addNode({ vid: v.id, type: 'clay', place: v.id + '_claypits', spots: cspots, blocks: clay, max: clay.length * 3, regen: 2, mode: 'swap', swap: B.SAND });
+}
+// a clay pit: diggers take the coloured clay and it slowly seeps back
+function clayPit(v, x0, z0, w, d, block, name) {
+  const blocks = [], spots = [];
+  flatten(x0 - 1, z0 - 1, w + 2, d + 2, GROUND);
+  for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + d; z++) {
+    const edge = x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + d - 1;
+    if (edge) { spots.push([x, z]); continue; }
+    data[idx(x, GROUND, z)] = block; blocks.push([x, GROUND, z, block]);
+  }
+  reserve(x0, z0, w, d, 1);
+  addPlace({ id: v.id + '_claypits', vid: v.id, kind: 'claypits', name, spots, entry: [x0 - 1, z0 + (d >> 1)], center: [x0 + (w >> 1), z0 + (d >> 1)] });
+  addNode({ vid: v.id, type: 'clay', place: v.id + '_claypits', spots, blocks, max: blocks.length * 3, regen: 8, mode: 'swap', swap: B.MUD });
+  pathTo([x0 - 1, z0 + (d >> 1)], v.cx, v.cz, B.PATH);
 }
 function pen(v, x0, z0) {
   const spots = [], blocks = [];
@@ -677,6 +882,7 @@ function standAt(x, z) { x = Math.floor(x); z = Math.floor(z); if (x < 0 || z < 
 
 // ---------- A* ----------
 const openHeap = [];
+const AREA_K = (W * D) / (208 * 208); // search budgets were tuned on the old map
 const gScore = new Float32Array(W * D), fromIdx = new Int32Array(W * D), stamp = new Uint32Array(W * D), closedStamp = new Uint32Array(W * D);
 let curStamp = 1;
 function findPath(sx, sz, tx, tz, maxNodes) {
@@ -690,7 +896,7 @@ function findPath(sx, sz, tx, tz, maxNodes) {
   const h = (i) => { const x = i % W, z = (i / W) | 0; const dx = Math.abs(x - tx), dz = Math.abs(z - tz); return (dx + dz) + (1.414 - 2) * Math.min(dx, dz); };
   gScore[start] = 0; stamp[start] = curStamp; fromIdx[start] = -1;
   push([h(start), start]);
-  let n = 0; maxNodes = maxNodes || 6000;
+  let n = 0; maxNodes = Math.round((maxNodes || 6000) * AREA_K);
   while (openHeap.length) {
     const [, cur] = pop();
     if (closedStamp[cur] === curStamp) continue;
@@ -829,7 +1035,7 @@ function findLot(vid, w, d) {
 // of the plan becomes a blueprint that villagers construct block by block when their village needs it.
 // Deterministic: every viewer derives the same camp and the same blueprints from the same seed.
 const plan = {};
-function groundOf(vid) { return vid === 'ashfield' ? B.DIRT : B.GRASS; }
+function groundOf(vid) { return VBY[vid] ? VBY[vid].style.ground : B.GRASS; }
 function unbuildRegion(id, vid, kind, name, x0, z0, x1, z1, keepPaths, emptyTop) {
   const blocks = [];
   for (let y = GROUND - 1; y < H; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
@@ -920,7 +1126,7 @@ const World = {
   W, H, D, GROUND, STAND, BLOCKS, B, data, light, standY, idx, inb, get, set, isSolid, isOpaque, onChange, edits,
   applyEdits, syncEdits, clearEdits, generate, places, buildings, torches, lots, nodes, roadCells, findPath, nearestWalkable, standAt,
   los, raycast, lightAt, placeAt, villageAt, mulberry32, building, furnish, computeLight, findLot, flatten, reserve, topBlockColor,
-  VILLAGES, VBY, CROSS, riverX, registerNode, get base() { return base; }, plan, unbuild, findGrowthLot, groundOf, occupied: () => occupied, heights: () => heights,
+  VILLAGES, VBY, CROSS, riverX, registerNode, roofCells, BIOMES, biomeAt, groundAt, LAKE, MOUNTAIN, get base() { return base; }, plan, unbuild, findGrowthLot, groundOf, occupied: () => occupied, heights: () => heights,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = World; else root.World = World;
 })(typeof window !== 'undefined' ? window : globalThis);

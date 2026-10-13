@@ -32,19 +32,29 @@ const MAT = {};
 [B.BRICK, B.ROOF_TILE, B.PLASTER, B.GLASS].forEach(b => { MAT[b] = 'clay'; });
 [B.CLOTH, B.WOOL].forEach(b => { MAT[b] = 'wool'; });
 MAT[B.TORCH] = 'coal';
+// biome materials: timber, dressed stone and fired clay in every local style
+[B.SPRUCE_PLANKS, B.SPRUCE_LOG, B.BIRCH_LOG, B.JUNGLE_LOG, B.DARK_PLANKS].forEach(b => { MAT[b] = 'wood'; });
+[B.SANDSTONE, B.CUT_SANDSTONE, B.MOSSY_COBBLE, B.MARBLE].forEach(b => { MAT[b] = 'stone'; });
+[B.TERRACOTTA, B.WHITE_TERRACOTTA, B.BROWN_TERRACOTTA, B.MUD_BRICK, B.STAINED_GLASS].forEach(b => { MAT[b] = 'clay'; });
+MAT[B.COPPER_ROOF] = 'iron'; MAT[B.CLOCK] = 'stone'; MAT[B.GOLD_BLOCK] = 'gold'; // lanterns are made in the forge from scrap: no stock needed
 // material per block: one log saws into four planks, one stone dresses into two bricks
 const MCOST = {};
 for (const b in MAT) MCOST[b] = 0.5;
 [B.PLANKS, B.FENCE, B.THATCH, B.TORCH].forEach(b => { MCOST[b] = 0.25; });
-[B.LOG, B.STONE, B.CLOTH, B.WOOL].forEach(b => { MCOST[b] = 1; });
+[B.LOG, B.STONE, B.CLOTH, B.WOOL, B.SPRUCE_LOG, B.BIRCH_LOG, B.JUNGLE_LOG, B.GOLD_BLOCK].forEach(b => { MCOST[b] = 1; });
+MCOST[B.COPPER_ROOF] = 0.25;
 const mcost = (blk, a) => (MCOST[blk] || 0) * (a ? 1.15 - Math.min(100, (a.skills && a.skills.building) || 10) * 0.003 : 1);
 Civ.MCOST = MCOST;
 // when a material runs out, builders change the plan instead of standing at the storehouse
 const SUB = {};
 SUB[B.BRICK] = [B.STONE_BRICK, B.COBBLE, B.PLANKS]; SUB[B.ROOF_TILE] = [B.SLATE, B.THATCH, B.PLANKS]; SUB[B.PLASTER] = [B.PLANKS, B.COBBLE]; SUB[B.GLASS] = [0];
 SUB[B.CLOTH] = [B.PLANKS]; SUB[B.WOOL] = [B.PLANKS]; SUB[B.TORCH] = [0];
-[B.COBBLE, B.STONE, B.STONE_BRICK].forEach(b => { SUB[b] = [B.PLANKS]; }); SUB[B.SLATE] = [B.THATCH, B.PLANKS];
+[B.COBBLE, B.STONE, B.STONE_BRICK].forEach(b => { SUB[b] = [B.PLANKS]; }); SUB[B.SLATE] = [B.DARK_PLANKS, B.THATCH, B.PLANKS];
 [B.PLANKS, B.LOG, B.FENCE, B.SHELF].forEach(b => { SUB[b] = [B.COBBLE, B.STONE_BRICK]; }); SUB[B.THATCH] = [B.SLATE, B.COBBLE];
+[B.SPRUCE_PLANKS, B.DARK_PLANKS, B.SPRUCE_LOG, B.BIRCH_LOG, B.JUNGLE_LOG].forEach(b => { SUB[b] = [B.COBBLE, B.STONE_BRICK, B.MUD_BRICK]; });
+[B.SANDSTONE, B.CUT_SANDSTONE].forEach(b => { SUB[b] = [B.MUD_BRICK, B.TERRACOTTA, B.DARK_PLANKS, B.PLANKS]; }); [B.MOSSY_COBBLE, B.MARBLE].forEach(b => { SUB[b] = [B.STONE_BRICK, B.PLASTER, B.PLANKS]; });
+[B.TERRACOTTA, B.WHITE_TERRACOTTA, B.BROWN_TERRACOTTA, B.MUD_BRICK].forEach(b => { SUB[b] = [B.STONE_BRICK, B.COBBLE, B.PLANKS]; });
+SUB[B.STAINED_GLASS] = [B.GLASS, 0]; SUB[B.COPPER_ROOF] = [B.SLATE, B.PLANKS]; SUB[B.CLOCK] = [B.STONE_BRICK, B.PLANKS]; SUB[B.LANTERN] = [B.TORCH, 0]; SUB[B.GOLD_BLOCK] = [B.STONE_BRICK, B.PLANKS];
 const MAT_WORD = { clay: 'clay', stone: 'stone', wood: 'timber', wool: 'wool', coal: 'coal' };
 function substitute(pr, mat, a) {
   const Vv = V(pr.vid); const st = Vv.econ.stock;
@@ -52,8 +62,13 @@ function substitute(pr, mat, a) {
   const swap = {}; let into = null;
   for (const key in rem) {
     let best = null, bs = -1;
-    for (const alt of SUB[key] || []) { if (alt === 0) { if (best === null) { best = 0; bs = 0; } continue; } const am = MAT[alt]; if (am === mat) continue; const have = (st[am] || 0) + (pr.site[am] || 0); if (have > bs) { bs = have; best = alt; } }
-    if (best === null || (best !== 0 && bs < Math.min(4, rem[key]))) continue;
+    const canDrop = (SUB[key] || []).includes(0);
+    // the first alternative in the list that the storehouse can supply: lists go from the closest look to the plainest
+    for (const alt of SUB[key] || []) { if (alt === 0) continue; const am = MAT[alt]; if (am === mat) continue; const have = am ? (st[am] || 0) + (pr.site[am] || 0) : 1e9; if (have >= Math.min(4, rem[key])) { bs = have; best = alt; break; } if (have > bs) { bs = have; best = alt; } }
+    // no material to switch to: leave the detail out when it is only a detail
+    if (best !== null && bs < Math.min(4, rem[key])) best = canDrop ? 0 : null;
+    if (best === null && canDrop) best = 0;
+    if (best === null) continue;
     swap[key] = best; if (best) into = into || MAT[best];
   }
   if (!Object.keys(swap).length) return 0;
@@ -516,44 +531,92 @@ Civ.taskOf = function (a) {
 };
 
 // ---------------- construction ----------------
+// homes name a material class (wood / stone / fine) that each settlement's style turns into real blocks
 const HOME = {
-  hut: { w: 5, d: 5, wallH: 3, wall: B.PLANKS, roof: B.THATCH, corner: B.LOG, label: 'wooden hut', value: 70 },
-  cottage: { w: 6, d: 6, wallH: 4, wall: B.PLASTER, roof: B.ROOF_TILE, corner: B.LOG, label: 'cottage', value: 130 },
-  stone: { w: 7, d: 7, wallH: 4, wall: B.COBBLE, roof: B.SLATE, corner: B.STONE_BRICK, label: 'stone house', value: 210 },
-  manor: { w: 9, d: 7, wallH: 5, wall: B.BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, label: 'manor', value: 360 },
-  civic: { w: 9, d: 8, wallH: 5, wall: B.STONE_BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, label: 'civic residence', value: 330 },
-  atelier: { w: 7, d: 7, wallH: 4, wall: B.PLANKS, roof: B.ROOF_TILE, corner: B.LOG, tower: true, label: 'builder\'s atelier', value: 230 },
+  hut: { w: 5, d: 5, wallH: 3, mat: 'wood', roof: B.THATCH, label: 'wooden hut', value: 70 },
+  cottage: { w: 6, d: 6, wallH: 4, mat: 'fine', label: 'cottage', value: 130, chimney: true },
+  stone: { w: 7, d: 7, wallH: 4, mat: 'stone', label: 'stone house', value: 210, chimney: true },
+  manor: { w: 9, d: 7, wallH: 5, mat: 'fine', label: 'manor', value: 360, turrets: true, lanterns: true },
+  civic: { w: 9, d: 8, wallH: 5, mat: 'stone', label: 'civic residence', value: 330, lanterns: true },
+  atelier: { w: 7, d: 7, wallH: 4, mat: 'wood', tower: true, label: 'builder\'s atelier', value: 230 },
   // town and city homes: more storeys on the same footprint
-  townhouse: { w: 7, d: 7, wallH: 4, floors: 2, wall: B.BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, label: 'two-storey townhouse', value: 420, cap: 7 },
-  cityhouse: { w: 8, d: 7, wallH: 4, floors: 3, wall: B.STONE_BRICK, roof: B.ROOF_TILE, corner: B.COBBLE, trim: B.BRICK, label: 'three-storey city house', value: 640, cap: 10 },
+  townhouse: { w: 7, d: 7, wallH: 4, floors: 2, mat: 'stone', label: 'two-storey townhouse', value: 420, cap: 7, balcony: true, chimney: true },
+  cityhouse: { w: 8, d: 7, wallH: 4, floors: 3, mat: 'fine', label: 'three-storey city house', value: 640, cap: 10, balcony: true, lanterns: true, accentRoof: true },
 };
-const SHOP = { w: 6, d: 6, wallH: 3, wall: B.PLASTER, roof: 'awning', corner: B.LOG, label: 'shop', value: 150 };
+// the same home in each biome's words
+const HOME_WORDS = { hut: { snow: 'igloo', desert: 'mud-brick hut', swamp: 'reed hut', badlands: 'clay hut' }, cottage: { desert: 'courtyard house', snow: 'timber cottage' }, stone: { desert: 'sandstone house', badlands: 'terracotta house' }, manor: { desert: 'palace', snow: 'lodge' } };
+Civ.homeLabel = (tier, vid) => { const v = World.VBY[vid]; return (HOME_WORDS[tier] && v && HOME_WORDS[tier][v.biome]) || HOME[tier].label; };
+const SHOP = { w: 6, d: 6, wallH: 3, mat: 'fine', roof: 'awning', label: 'shop', value: 150 };
 const CIVIC = {
-  library: { w: 9, d: 7, wallH: 5, wall: B.STONE_BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, label: 'Library', value: 300, cost: 220 },
-  watchtower: { w: 4, d: 4, wallH: 8, wall: B.COBBLE, roof: B.SLATE, corner: B.LOG, label: 'Watchtower', value: 160, cost: 140 },
-  school: { w: 8, d: 7, wallH: 4, wall: B.PLASTER, roof: B.ROOF_TILE, corner: B.LOG, label: 'School', value: 220, cost: 170 },
-  hall: { w: 10, d: 8, wallH: 5, wall: B.BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, label: 'Market Hall', value: 360, cost: 260 },
-  bank: { w: 9, d: 8, wallH: 5, floors: 2, wall: B.STONE_BRICK, roof: B.SLATE, corner: B.COBBLE, trim: B.BRICK, label: 'Bank', value: 520, cost: 380 },
-  warehouse: { w: 11, d: 8, wallH: 5, wall: B.PLANKS, roof: B.SLATE, corner: B.LOG, label: 'Warehouse', value: 260, cost: 200 },
-  workshop: { w: 8, d: 7, wallH: 4, wall: B.PLANKS, roof: B.THATCH, corner: B.LOG, label: 'Workshop', value: 180, cost: 140 },
-  cityhall: { w: 11, d: 9, wallH: 5, floors: 2, wall: B.STONE_BRICK, roof: B.SLATE, corner: B.STONE_BRICK, trim: B.PLASTER, tower: true, label: 'City Hall', value: 800, cost: 520 },
+  library: { w: 9, d: 7, wallH: 5, mat: 'stone', label: 'Library', value: 300, cost: 220, lanterns: true },
+  watchtower: { w: 4, d: 4, wallH: 8, mat: 'stone', roofShape: 'spire', label: 'Watchtower', value: 160, cost: 140 },
+  school: { w: 8, d: 7, wallH: 4, mat: 'fine', label: 'School', value: 220, cost: 170, chimney: true },
+  hall: { w: 10, d: 8, wallH: 5, mat: 'fine', label: 'Market Hall', value: 360, cost: 260, lanterns: true },
+  bank: { w: 9, d: 8, wallH: 5, floors: 2, mat: 'stone', wall: B.MARBLE, label: 'Bank', value: 520, cost: 380, lanterns: true, accentRoof: true },
+  warehouse: { w: 11, d: 8, wallH: 5, mat: 'wood', label: 'Warehouse', value: 260, cost: 200 },
+  workshop: { w: 8, d: 7, wallH: 4, mat: 'wood', label: 'Workshop', value: 180, cost: 140, chimney: true },
+  cityhall: { w: 11, d: 9, wallH: 5, floors: 2, mat: 'stone', tower: true, label: 'City Hall', value: 800, cost: 520, lanterns: true, accentRoof: true },
+  // landmarks: each has its own shape, built once when the settlement is ready for it
+  fountain: { gen: 'fountain', w: 5, d: 5, h: 4, label: 'Fountain', value: 180, cost: 110 },
+  windmill: { gen: 'windmill', w: 5, d: 5, h: 14, label: 'Windmill', value: 240, cost: 160 },
+  statue: { gen: 'statue', w: 5, d: 5, h: 10, label: 'Statue', value: 260, cost: 160 },
+  lighthouse: { gen: 'lighthouse', w: 5, d: 5, h: 22, label: 'Lighthouse', value: 420, cost: 300 },
+  clocktower: { gen: 'clocktower', w: 5, d: 5, h: 26, label: 'Clock Tower', value: 520, cost: 360 },
+  observatory: { gen: 'observatory', w: 7, d: 7, h: 14, label: 'Observatory', value: 480, cost: 340 },
+  greenhouse: { gen: 'greenhouse', w: 7, d: 9, h: 9, label: 'Greenhouse', value: 300, cost: 200 },
+  pyramid: { gen: 'pyramid', w: 13, d: 13, h: 10, label: 'Pyramid', value: 700, cost: 450 },
+  temple: { gen: 'temple', w: 9, d: 15, h: 26, label: 'Cathedral', value: 900, cost: 600 },
+  castle: { gen: 'castle', w: 11, d: 11, h: 16, label: 'Castle Keep', value: 1100, cost: 800 },
+  arena: { gen: 'arena', w: 15, d: 15, h: 7, label: 'Arena', value: 800, cost: 520 },
+  igloo: { gen: 'igloo', w: 5, d: 5, h: 5, label: 'igloo', value: 70 },
 };
-Civ.HOME = HOME;
-function blueprint(lot, spec, kind) {
-  const { x, z } = lot; const w = spec.w, d = spec.d;
-  const G = World.GROUND, ST = World.STAND;
-  const L = [], stages = [];
-  const mark = n => stages.push([n, L.length]);
+Civ.HOME = HOME; Civ.CIVIC = CIVIC;
+// which landmark a settlement raises next, by stage and land
+const LANDMARKS = [
+  ['fountain', 2, () => true],
+  ['windmill', 1, (v) => ['meadow', 'swamp', 'badlands'].includes(v.biome)],
+  ['statue', 2, () => true],
+  ['lighthouse', 2, (v) => v.biome === 'swamp' || v.id === 'rivergate'],
+  ['observatory', 3, (v) => v.biome === 'snow' || v.id === 'highvale'],
+  ['greenhouse', 3, (v) => v.biome === 'meadow' || v.biome === 'snow'],
+  ['pyramid', 3, (v) => v.biome === 'desert'],
+  ['clocktower', 3, () => true],
+  ['castle', 4, (v) => ['badlands', 'snow'].includes(v.biome)],
+  ['arena', 4, (v) => ['swamp', 'desert', 'meadow'].includes(v.biome)],
+  ['temple', 4, () => true],
+];
+Civ.LANDMARKS = LANDMARKS;
+const styleOf = (vid) => (World.VBY[vid] || World.VBY.greenhollow).style;
+// a small deterministic generator per lot, so a blueprint never changes between viewers
+function lotRng(lot) { let h = ((lot.x * 73856093) ^ (lot.z * 19349663) ^ 0x5bd1e995) >>> 0; return () => { h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0; h ^= h >>> 16; return (h >>> 0) / 4294967296; }; }
+function doorOf(lot, w, d) {
+  const { x, z } = lot;
   const toCenter = World.VBY[lot.vid] ? [World.VBY[lot.vid].cx - (x + w / 2), World.VBY[lot.vid].cz - (z + d / 2)] : [0, 1];
   const door = lot.door || (Math.abs(toCenter[0]) > Math.abs(toCenter[1]) ? (toCenter[0] > 0 ? 'E' : 'W') : (toCenter[1] > 0 ? 'S' : 'N'));
   let dx, dz;
   if (door === 'S') { dx = x + (w >> 1); dz = z + d - 1; } if (door === 'N') { dx = x + (w >> 1); dz = z; }
   if (door === 'E') { dx = x + w - 1; dz = z + (d >> 1); } if (door === 'W') { dx = x; dz = z + (d >> 1); }
   const out = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] }[door];
+  return { door, dx, dz, out };
+}
+function clearSite(L, x, z, w, d, h) { const ST = World.STAND; for (let i = x - 1; i <= x + w; i++) for (let k = z - 1; k <= z + d; k++) for (let y = ST; y < ST + h; y++) if (World.get(i, y, k)) L.push([i, y, k, 0]); }
+function blueprint(lot, spec, kind, noClear) {
+  if (spec.gen) return LANDMARK[spec.gen](lot, spec, styleOf(lot.vid), lotRng(lot), noClear);
+  const { x, z } = lot; const w = spec.w, d = spec.d;
+  const G = World.GROUND, ST = World.STAND;
+  const st = styleOf(lot.vid), r = lotRng(lot);
+  const wall = spec.wall !== undefined ? spec.wall : st[spec.mat || 'wood'];
+  const corner = spec.corner !== undefined ? spec.corner : st.corner;
+  const roof = spec.roof !== undefined ? spec.roof : spec.accentRoof && st.accent !== B.GOLD_BLOCK ? st.accent : st.roofs[Math.floor(r() * st.roofs.length)];
+  const trim = spec.trim !== undefined ? spec.trim : (spec.mat === 'fine' || (spec.floors || 1) > 1) ? st.trim : null;
+  let shape = spec.roofShape || st.roofShape; if (shape === 'gable' && r() < 0.3) shape = 'hip'; if (shape === 'steep' && w > 8) shape = 'hip';
+  const L = [], stages = [];
+  const mark = n => stages.push([n, L.length]);
+  const { dx, dz, out } = doorOf(lot, w, d);
   mark('site clearing');
-  for (let i = x - 1; i <= x + w; i++) for (let k = z - 1; k <= z + d; k++) for (let y = ST; y < ST + spec.wallH * (spec.floors || 1) + 8; y++) if (World.get(i, y, k)) L.push([i, y, k, 0]);
+  if (!noClear) clearSite(L, x, z, w, d, spec.wallH * (spec.floors || 1) + 10);
   mark('foundation');
-  for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) L.push([i, G, k, kind === 'civic' || spec.wall === B.COBBLE ? B.COBBLE : B.PLANKS]);
+  for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) L.push([i, G, k, kind === 'civic' || spec.mat === 'stone' ? (st.stone === B.SANDSTONE ? B.SANDSTONE : B.COBBLE) : B.PLANKS]);
   mark('walls');
   const floors = spec.floors || 1, SH = spec.wallH;
   const top = ST + SH * floors;
@@ -563,37 +626,56 @@ function blueprint(lot, spec, kind) {
       const edge = i === x || i === x + w - 1 || k === z || k === z + d - 1;
       // upper floors: a plank floor with a stair hole in one corner
       if (!edge) { if (ly === SH - 1 && y < top - 1 && !(i <= x + 2 && k <= z + 2)) L.push([i, y, k, B.PLANKS]); continue; }
-      const corner = (i === x || i === x + w - 1) && (k === z || k === z + d - 1);
-      let b = corner ? spec.corner : spec.wall;
+      const cornerCell = (i === x || i === x + w - 1) && (k === z || k === z + d - 1);
+      let b = cornerCell ? corner : wall;
       const along = (k === z || k === z + d - 1) ? i - x : k - z, len = (k === z || k === z + d - 1) ? w : d;
       if (i === dx && k === dz && y < ST + 2) b = B.DOOR;
-      else if (!corner && ly === 1 && along % 2 === 1 && along > 0 && along < len - 1) b = B.GLASS;
-      else if (!corner && ly === SH - 1 && spec.trim) b = spec.trim;
+      else if (!cornerCell && ly === 1 && along % 2 === 1 && along > 0 && along < len - 1) b = B.GLASS;
+      else if (!cornerCell && ly === SH - 1 && trim) b = trim;
       L.push([i, y, k, b]);
     }
     if (floors > 1 && ly === SH - 1 && y < top - 1) mark('floor ' + (Math.floor((y - ST) / SH) + 2));
   }
   mark('roof');
+  let roofTop = top;
   if (spec.roof === 'awning') {
     for (let i = x - 1; i <= x + w; i++) for (let k = z - 1; k <= z + d; k++) L.push([i, top, k, (i + k) % 2 ? B.CLOTH : B.ROOF_TILE]);
     for (let i = x + 1; i < x + w - 1; i++) for (let k = z + 1; k < z + d - 1; k++) L.push([i, top + 1, k, B.ROOF_TILE]);
   } else {
-    const alongX = w >= d; const Ln = alongX ? w : d, Sh = alongX ? d : w;
-    for (let lvl = 0; ; lvl++) {
-      const a = lvl - 1, b = Sh - lvl; if (a > b) break;
-      const y = top + lvl;
-      for (let t = -1; t <= Ln; t++) {
-        for (const sIdx of (a === b ? [a] : [a, b])) { const px = alongX ? x + t : x + sIdx, pz = alongX ? z + sIdx : z + t; L.push([px, y, pz, spec.roof]); }
-        if (t === 0 || t === Ln - 1) for (let sIdx = a + 1; sIdx < b; sIdx++) { const px = alongX ? x + t : x + sIdx, pz = alongX ? z + sIdx : z + t; L.push([px, y, pz, spec.wall]); }
-      }
-      if (a === b || a + 1 === b) break;
+    for (const c of World.roofCells(x, z, w, d, top, shape, roof, wall, trim || wall)) { L.push(c); roofTop = Math.max(roofTop, c[1]); }
+  }
+  // details that make streets look lived in
+  if (spec.chimney && shape !== 'flat') {
+    mark('chimney');
+    const cx = r() < 0.5 ? x + 1 : x + w - 2, cz = r() < 0.5 ? z + 1 : z + d - 2;
+    let hi = top; for (const c of L) if (c[0] === cx && c[2] === cz && c[1] > hi) hi = c[1];
+    for (let y = top; y <= hi + 1; y++) L.push([cx, y, cz, st.stone === B.SANDSTONE ? B.MUD_BRICK : B.BRICK]);
+  }
+  if (spec.turrets) {
+    mark('turrets');
+    for (const [tx, tz] of [[x, z], [x + w - 1, z + d - 1]]) {
+      for (let y = top; y < top + 4; y++) L.push([tx, y, tz, corner]);
+      L.push([tx, top + 4, tz, st.accent === B.GOLD_BLOCK ? B.GOLD_BLOCK : st.accent || B.SLATE]);
     }
+  }
+  if (spec.balcony && floors > 1) {
+    mark('balcony');
+    const by = ST + SH; // the second storey's floor
+    const along = dz === z || dz === z + d - 1;
+    for (let t = -1; t <= 1; t++) {
+      const bx = along ? dx + t : dx + out[0], bz = along ? dz + out[1] : dz + t;
+      L.push([bx, by - 1, bz, B.PLANKS], [bx, by, bz, B.FENCE]);
+    }
+  }
+  if (spec.lanterns) {
+    const along = dz === z || dz === z + d - 1;
+    for (const t of [-1, 1]) { const lx = along ? dx + t : dx + out[0], lz = along ? dz + out[1] : dz + t; L.push([lx, ST + 2, lz, B.LANTERN]); }
   }
   if (spec.tower) {
     mark('tower');
     const tx = x + w - 1, tz = z;
-    for (let y = top; y < top + 4; y++) L.push([tx, y, tz, B.STONE_BRICK], [tx - 1, y, tz, B.STONE_BRICK], [tx, y, tz + 1, B.STONE_BRICK]);
-    L.push([tx, top + 4, tz, B.TORCH]);
+    for (let y = roofTop - 2; y < roofTop + 3; y++) L.push([tx, y, tz, st.stone], [tx - 1, y, tz, st.stone], [tx, y, tz + 1, st.stone]);
+    L.push([tx, roofTop + 3, tz, B.LANTERN]);
   }
   mark('interior');
   L.push([x + 1, ST, z + 1, kind === 'shop' ? B.SHELF : B.CLOTH], [x + w - 2, ST, z + d - 2, B.TORCH]);
@@ -602,13 +684,264 @@ function blueprint(lot, spec, kind) {
   mark('complete');
   return { list: L, stages, door: [dx, dz], entry: [dx + out[0], dz + out[1]] };
 }
+// ---------- landmarks ----------
+const LANDMARK = {};
+Civ.blueprint = (lot, spec, kind, noClear) => blueprint(lot, spec, kind, noClear);
+function lmStart(lot, spec, noClear) {
+  const L = [], stages = []; const mark = n => stages.push([n, L.length]);
+  const D = doorOf(lot, spec.w, spec.d);
+  mark('site clearing'); if (!noClear) clearSite(L, lot.x, lot.z, spec.w, spec.d, spec.h || 12);
+  return { L, stages, mark, D };
+}
+function lmEnd(o, extra) { const { L, mark, D } = o; mark('complete'); return Object.assign({ list: L, stages: o.stages, door: [D.dx, D.dz], entry: [D.dx + D.out[0], D.dz + D.out[1]] }, extra || {}); }
+function ring(L, x, z, w, d, y, b, cut) { for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) { const e = i === x || i === x + w - 1 || k === z || k === z + d - 1; if (!e) continue; if (cut && (i === x || i === x + w - 1) && (k === z || k === z + d - 1)) continue; L.push([i, y, k, b]); } }
+function slab(L, x, z, w, d, y, b) { for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) L.push([i, y, k, b]); }
+LANDMARK.fountain = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  mark('foundation'); slab(L, x, z, 5, 5, G, st.stone === B.SANDSTONE ? B.CUT_SANDSTONE : B.STONE_BRICK);
+  mark('basin'); ring(L, x, z, 5, 5, ST, st.stone === B.SANDSTONE ? B.CUT_SANDSTONE : B.STONE_BRICK);
+  mark('water'); for (let i = x + 1; i < x + 4; i++) for (let k = z + 1; k < z + 4; k++) if (i !== x + 2 || k !== z + 2) L.push([i, ST, k, B.WATER]);
+  mark('column'); L.push([x + 2, ST, z + 2, B.MARBLE], [x + 2, ST + 1, z + 2, B.MARBLE], [x + 2, ST + 2, z + 2, B.WATER]);
+  return lmEnd(o);
+};
+LANDMARK.windmill = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  const wall = st.fine === B.CUT_SANDSTONE ? B.MUD_BRICK : st.fine, top = ST + 7;
+  mark('foundation'); slab(L, x, z, 5, 5, G, B.COBBLE);
+  mark('walls');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + 5; i++) for (let k = z; k < z + 5; k++) {
+    const e = i === x || i === x + 4 || k === z || k === z + 4; if (!e) continue;
+    const c = (i === x || i === x + 4) && (k === z || k === z + 4);
+    let b = c ? st.corner : wall; if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR; else if (!c && (y - ST) % 3 === 1 && ((i + k) % 2)) b = B.GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('roof'); for (const c of World.roofCells(x, z, 5, 5, top, 'hip', st.roofs[0], wall)) L.push(c);
+  mark('sails');
+  // four sails turning on a hub over the door
+  const along = D.dz === z || D.dz === z + 4; const hx = D.dx + (along ? 0 : D.out[0]), hz = D.dz + (along ? D.out[1] : 0), hy = top - 1;
+  const at = (t, y) => along ? [hx + t, y, hz] : [hx, y, hz + t];
+  L.push([...at(0, hy), B.DARK_PLANKS]);
+  for (let k = 1; k <= 4; k++) {
+    L.push([...at(0, hy + k), B.PLANKS], [...at(k, hy), B.PLANKS]);
+    if (hy - k >= ST + 2) L.push([...at(0, hy - k), B.PLANKS]);
+    L.push([...at(-k, hy), B.PLANKS]);
+    if (k >= 2) { L.push([...at(1, hy + k), B.WOOL], [...at(k, hy - 1), B.WOOL], [...at(-k, hy + 1), B.WOOL]); if (hy - k >= ST + 2) L.push([...at(-1, hy - k), B.WOOL]); }
+  }
+  mark('interior'); L.push([x + 1, ST, z + 1, B.CLOTH], [x + 3, ST, z + 3, B.CLOTH], [x + 3, ST, z + 1, B.TORCH]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.statue = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  const cx = x + 2, cz = z + 2, stone = st.stone === B.SANDSTONE ? B.CUT_SANDSTONE : B.STONE_BRICK;
+  mark('foundation'); slab(L, x, z, 5, 5, G, B.COBBLE);
+  mark('pedestal'); slab(L, x + 1, z + 1, 3, 3, ST, stone); slab(L, x + 1, z + 1, 3, 3, ST + 1, stone); L.push([cx, ST + 1, cz, B.GOLD_BLOCK]);
+  mark('figure');
+  const along = D.dz === z || D.dz === z + 4;
+  const side = (t, y) => along ? [cx + t, y, cz] : [cx, y, cz + t];
+  L.push([...side(0, ST + 2), B.MARBLE], [...side(0, ST + 3), B.MARBLE], [...side(0, ST + 4), B.MARBLE], [...side(0, ST + 5), B.MARBLE]);
+  L.push([...side(-1, ST + 5), B.MARBLE], [...side(1, ST + 5), B.MARBLE], [...side(1, ST + 6), B.MARBLE], [...side(1, ST + 7), B.LANTERN]);
+  L.push([...side(0, ST + 6), B.MARBLE], [...side(0, ST + 7), B.GOLD_BLOCK]);
+  mark('lamps'); for (const [lx, lz] of [[x, z], [x + 4, z + 4]]) L.push([lx, ST, lz, B.FENCE], [lx, ST + 1, lz, B.LANTERN]);
+  return lmEnd(o);
+};
+LANDMARK.lighthouse = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  const top = ST + 14;
+  mark('foundation'); slab(L, x, z, 5, 5, G, B.COBBLE);
+  mark('tower');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + 5; i++) for (let k = z; k < z + 5; k++) {
+    const e = i === x || i === x + 4 || k === z || k === z + 4; if (!e) continue;
+    if ((i === x || i === x + 4) && (k === z || k === z + 4)) continue; // rounded
+    let b = Math.floor((y - ST) / 3) % 2 ? B.BRICK : B.MARBLE;
+    if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR; else if ((y - ST) % 5 === 3 && (i === x + 2 || k === z + 2)) b = B.GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('gallery'); slab(L, x - 1, z - 1, 7, 7, top, B.DARK_PLANKS); ring(L, x - 1, z - 1, 7, 7, top + 1, B.FENCE);
+  mark('lantern room'); ring(L, x + 1, z + 1, 3, 3, top + 1, B.GLASS); ring(L, x + 1, z + 1, 3, 3, top + 2, B.GLASS); L.push([x + 2, top + 1, z + 2, B.LANTERN], [x + 2, top + 2, z + 2, B.LANTERN]);
+  mark('cap'); for (const c of World.roofCells(x + 1, z + 1, 3, 3, top + 3, 'hip', B.COPPER_ROOF, B.MARBLE)) L.push(c); L.push([x + 2, top + 6, z + 2, B.GOLD_BLOCK]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.clocktower = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  const top = ST + 15, stone = st.stone === B.TERRACOTTA ? B.STONE_BRICK : st.stone === B.MUD_BRICK ? B.STONE_BRICK : st.stone;
+  mark('foundation'); slab(L, x, z, 5, 5, G, B.COBBLE);
+  mark('tower');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + 5; i++) for (let k = z; k < z + 5; k++) {
+    const e = i === x || i === x + 4 || k === z || k === z + 4; if (!e) continue;
+    const c = (i === x || i === x + 4) && (k === z || k === z + 4);
+    let b = c ? B.COBBLE : stone;
+    if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR;
+    else if (!c && y === top - 3 && (i === x + 2 || k === z + 2)) b = B.CLOCK;
+    else if (!c && (y - ST) % 4 === 2 && (i === x + 2 || k === z + 2) && y < top - 4) b = B.GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('belfry'); ring(L, x, z, 5, 5, top, B.COBBLE); for (const [i, k] of [[x, z], [x + 4, z], [x, z + 4], [x + 4, z + 4]]) L.push([i, top + 1, k, B.COBBLE], [i, top + 2, k, B.COBBLE]); L.push([x + 2, top + 1, z + 2, B.GOLD_BLOCK]);
+  mark('spire'); for (const c of World.roofCells(x, z, 5, 5, top + 3, 'spire', st.accent === B.GOLD_BLOCK ? B.SLATE : st.accent, stone)) L.push(c);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.observatory = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  const top = ST + 6;
+  mark('foundation'); slab(L, x, z, 7, 7, G, B.STONE_BRICK);
+  mark('walls');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + 7; i++) for (let k = z; k < z + 7; k++) {
+    const e = i === x || i === x + 6 || k === z || k === z + 6; if (!e) continue;
+    if ((i === x || i === x + 6) && (k === z || k === z + 6)) continue;
+    let b = st.stone; if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR; else if (y === ST + 3 && (i === x + 3 || k === z + 3)) b = B.GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('dome'); slab(L, x + 1, z + 1, 5, 5, top - 1, B.PLANKS); for (const c of World.roofCells(x, z, 7, 7, top, 'dome', B.GLASS, st.stone)) L.push(c); ring(L, x, z, 7, 7, top, B.COPPER_ROOF, true);
+  mark('telescope'); L.push([x + 3, top, z + 3, B.DARK_PLANKS], [x + 3, top + 1, z + 4, B.DARK_PLANKS], [x + 3, top + 2, z + 4, B.GOLD_BLOCK]);
+  mark('interior'); L.push([x + 1, ST, z + 1, B.SHELF], [x + 5, ST, z + 5, B.TORCH]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.greenhouse = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND, w = 7, d = 9;
+  mark('foundation'); slab(L, x, z, w, d, G, B.COBBLE); for (let i = x + 1; i < x + w - 1; i++) for (let k = z + 2; k < z + d - 2; k++) if (i !== x + 3) L.push([i, G, k, B.FARMLAND]);
+  mark('frame');
+  for (let y = ST; y < ST + 4; y++) for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) {
+    const e = i === x || i === x + w - 1 || k === z || k === z + d - 1; if (!e) continue;
+    let b = ((i - x) % 2 === 0 && (k - z) % 2 === 0) ? st.corner : B.GLASS; if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR;
+    L.push([i, y, k, b]);
+  }
+  mark('glass roof'); for (const c of World.roofCells(x, z, w, d, ST + 4, 'gable', B.GLASS, B.GLASS)) L.push(c);
+  mark('beds'); for (let i = x + 1; i < x + w - 1; i++) for (let k = z + 2; k < z + d - 2; k++) if (i !== x + 3) L.push([i, ST, k, (i + k) % 3 ? B.CROP : B.RED_FLOWER]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.pyramid = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND, n = 13, c = 6;
+  mark('foundation'); slab(L, x, z, n, n, G, B.SANDSTONE);
+  // a passage from the door to a burial chamber under the middle
+  const hollow = (i, k, y) => { if (y > ST + 2) return false; if (Math.abs(i - (x + c)) <= 1 && Math.abs(k - (z + c)) <= 1) return true; const along = D.dz === z || D.dz === z + n - 1; return along ? (i === x + c && (D.dz === z ? k < z + c : k > z + c)) && y < ST + 2 : (k === z + c && (D.dx === x ? i < x + c : i > x + c)) && y < ST + 2; };
+  for (let lvl = 0; lvl <= c; lvl++) {
+    mark(lvl === 0 ? 'base' : 'step ' + (lvl + 1));
+    const y = ST + lvl;
+    for (let i = x + lvl; i < x + n - lvl; i++) for (let k = z + lvl; k < z + n - lvl; k++) {
+      if (hollow(i, k, y)) continue;
+      const edge = i === x + lvl || i === x + n - lvl - 1 || k === z + lvl || k === z + n - lvl - 1;
+      if (!edge && lvl > 0 && !(y <= ST + 3)) continue; // keep it hollow where nobody sees
+      L.push([i, y, k, lvl % 2 ? B.CUT_SANDSTONE : B.SANDSTONE]);
+    }
+  }
+  mark('capstone'); L.push([x + c, ST + c + 1, z + c, B.GOLD_BLOCK]);
+  mark('chamber'); L.push([x + c, ST, z + c, B.GOLD_BLOCK], [x + c - 1, ST + 2, z + c - 1, B.LANTERN]);
+  // the door: an opening in the base, the passage is open to walk
+  const dd = D; L.push([dd.dx + dd.out[0], G, dd.dz + dd.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.temple = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND, w = 9, d = 15, H0 = 7, top = ST + H0;
+  const wall = B.MARBLE, frame = st.stone === B.MUD_BRICK || st.stone === B.TERRACOTTA ? B.STONE_BRICK : st.stone;
+  mark('foundation'); slab(L, x, z, w, d, G, B.STONE_BRICK);
+  mark('nave');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) {
+    const e = i === x || i === x + w - 1 || k === z || k === z + d - 1; if (!e) continue;
+    const c = (i === x || i === x + w - 1) && (k === z || k === z + d - 1);
+    const along = (k === z || k === z + d - 1) ? i - x : k - z;
+    let b = c || along % 3 === 0 ? frame : wall;
+    if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR;
+    else if (!c && along % 3 !== 0 && y >= ST + 2 && y <= ST + 5) b = B.STAINED_GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('roof'); for (const c of World.roofCells(x, z, w, d, top, 'gable', st.accent === B.GOLD_BLOCK ? B.SLATE : st.accent, wall)) L.push(c);
+  mark('bell tower');
+  const along = D.dz === z || D.dz === z + d - 1;
+  const bx = along ? D.dx - 1 : (D.dx === x ? x : x + w - 3), bz = along ? (D.dz === z ? z : z + d - 3) : D.dz - 1;
+  const btop = top + 11;
+  for (let y = top - 1; y < btop; y++) for (let i = bx; i < bx + 3; i++) for (let k = bz; k < bz + 3; k++) {
+    const e = i === bx || i === bx + 2 || k === bz || k === bz + 2; if (!e) continue;
+    const c = (i === bx || i === bx + 2) && (k === bz || k === bz + 2);
+    if (!c && y >= btop - 3 && y < btop - 1) continue; // open belfry arches
+    L.push([i, y, k, c ? frame : wall]);
+  }
+  L.push([bx + 1, btop - 2, bz + 1, B.GOLD_BLOCK]);
+  for (const c of World.roofCells(bx, bz, 3, 3, btop, 'spire', st.accent === B.GOLD_BLOCK ? B.SLATE : st.accent, wall)) L.push(c);
+  mark('interior');
+  for (let k = z + 3; k < z + d - 3; k += 2) for (let i = x + 1; i < x + w - 1; i++) if (i !== x + (w >> 1)) L.push([i, ST, k, B.DARK_PLANKS]);
+  const far = D.dz === z ? z + d - 2 : D.dz === z + d - 1 ? z + 1 : z + (d >> 1);
+  L.push([x + (w >> 1), ST, far, B.CLOTH], [x + 1, ST + 2, z + 1, B.LANTERN], [x + w - 2, ST + 2, z + d - 2, B.LANTERN]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.castle = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND, n = 11, top = ST + 8;
+  const stone = st.stone === B.MUD_BRICK || st.stone === B.TERRACOTTA ? B.STONE_BRICK : st.stone;
+  mark('foundation'); slab(L, x, z, n, n, G, B.COBBLE);
+  mark('walls');
+  for (let y = ST; y < top; y++) for (let i = x; i < x + n; i++) for (let k = z; k < z + n; k++) {
+    const e = i === x || i === x + n - 1 || k === z || k === z + n - 1; if (!e) continue;
+    let b = (y - ST) % 4 === 3 ? B.COBBLE : stone; if (i === D.dx && k === D.dz && y < ST + 2) b = B.DOOR; else if (y === ST + 4 && (i - x) % 3 === 2 && (k - z) % 3 === 2) b = B.GLASS; else if (y === ST + 4 && ((i - x) % 4 === 2 || (k - z) % 4 === 2) && !((i === x || i === x + n - 1) && (k === z || k === z + n - 1))) b = B.GLASS;
+    L.push([i, y, k, b]);
+  }
+  mark('roof'); for (const c of World.roofCells(x, z, n, n, top, 'flat', B.PLANKS, stone, stone)) L.push(c);
+  mark('turrets');
+  for (const [tx, tz] of [[x - 1, z - 1], [x + n - 2, z - 1], [x - 1, z + n - 2], [x + n - 2, z + n - 2]]) {
+    for (let y = ST; y < top + 4; y++) for (let i = tx; i < tx + 3; i++) for (let k = tz; k < tz + 3; k++) { const e = i === tx || i === tx + 2 || k === tz || k === tz + 2; if (e && World.inb(i, y, k)) L.push([i, y, k, stone]); }
+    for (let i = tx; i < tx + 3; i++) for (let k = tz; k < tz + 3; k++) if ((i + k) % 2 === 0) L.push([i, top + 4, k, stone]);
+    L.push([tx + 1, top + 4, tz + 1, B.FENCE], [tx + 1, top + 5, tz + 1, B.FENCE], [tx + 1, top + 6, tz + 1, B.CLOTH]);
+  }
+  mark('interior'); L.push([x + 1, ST, z + 1, B.CLOTH], [x + n - 2, ST, z + 1, B.SHELF], [x + 1, ST + 2, z + n - 2, B.LANTERN], [x + n - 2, ST + 2, z + n - 2, B.LANTERN]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
+LANDMARK.arena = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND, n = 15, c = 7;
+  const stone = st.stone === B.MUD_BRICK ? B.SANDSTONE : st.stone;
+  mark('foundation'); slab(L, x, z, n, n, G, B.COBBLE); for (let i = x + 4; i < x + n - 4; i++) for (let k = z + 4; k < z + n - 4; k++) L.push([i, G, k, B.SAND]);
+  // stepped seating rising outwards, cut by the entrance on the door side
+  const gate = (i, k) => { const along = D.dz === z || D.dz === z + n - 1; return along ? i === x + c && (D.dz === z ? k < z + 4 : k > z + n - 5) : k === z + c && (D.dx === x ? i < x + 4 : i > x + n - 5); };
+  for (let t = 0; t < 4; t++) {
+    mark(t === 0 ? 'seating' : 'tier ' + (t + 1));
+    for (let i = x; i < x + n; i++) for (let k = z; k < z + n; k++) {
+      const dist = Math.max(Math.abs(i - (x + c)), Math.abs(k - (z + c)));
+      if (dist < 4 || gate(i, k)) continue;
+      const height = dist - 3; // 1..4 blocks
+      if (t < height) L.push([i, ST + t, k, t === height - 1 ? (dist === 7 ? stone : st.wood) : stone]);
+    }
+  }
+  mark('banners'); for (let i = x; i < x + n; i += 3) for (const k of [z, z + n - 1]) if (!gate(i, k)) L.push([i, ST + 4, k, B.FENCE], [i, ST + 5, k, B.CLOTH]);
+  for (const [lx, lz] of [[x + 4, z + 4], [x + n - 5, z + n - 5], [x + 4, z + n - 5], [x + n - 5, z + 4]]) L.push([lx, ST, lz, B.FENCE], [lx, ST + 1, lz, B.LANTERN]);
+  return lmEnd(o);
+};
+LANDMARK.igloo = (lot, spec, st, r, nc) => {
+  const o = lmStart(lot, spec, nc), { L, mark, D } = o, { x, z } = lot, G = World.GROUND, ST = World.STAND;
+  mark('foundation'); slab(L, x, z, 5, 5, G, B.SNOW);
+  mark('dome');
+  const cx = x + 2, cz = z + 2;
+  for (let y = 0; y <= 3; y++) for (let i = x; i < x + 5; i++) for (let k = z; k < z + 5; k++) {
+    const rr = Math.hypot(i - cx, (y - 0.4) * 1.15, k - cz);
+    if (rr > 2.95 || rr < 1.85) continue;
+    if (i === D.dx && k === D.dz && y < 2) continue;
+    L.push([i, ST + y, k, B.SNOW]);
+  }
+  mark('interior'); L.push([x + 1, ST, z + 2, B.WOOL], [x + 3, ST + 1, z + 2, B.LANTERN]);
+  L.push([D.dx + D.out[0], G, D.dz + D.out[1], B.PATH]);
+  return lmEnd(o);
+};
 function needsOf(list) { const m = {}; for (const [, , , b] of list) { const k = MAT[b]; if (k) m[k] = (m[k] || 0) + MCOST[b]; } return m; }
 function costOf(list, vid) { const need = needsOf(list); let c = list.length * 0.32; for (const k in need) c += need[k] * Sim.priceOf(k, vid); return Math.round(c); }
-Civ.estimate = function (vid, tier) { const spec = HOME[tier]; const fake = { x: 0, z: 0, vid }; const n = spec.w * spec.d; const walls = 2 * (spec.w + spec.d) * spec.wallH; let c = (n + walls + n * 1.4) * 0.32; c += walls * Sim.priceOf(MAT[spec.wall], vid) + n * Sim.priceOf('wood', vid) + n * 1.4 * Sim.priceOf(MAT[spec.roof] || 'wood', vid); void fake; return Math.round(c); };
+// the spec a project was started from; in the snow the first homes are igloos, every home takes the local name
+Civ.specFor = function (pr) {
+  let spec = pr.kind === 'home' ? HOME[pr.tier] : pr.kind === 'shop' ? SHOP : pr.kind === 'civic' ? CIVIC[pr.civic] : null;
+  if (!spec) return null;
+  if (pr.kind === 'home') { const vv = World.VBY[pr.vid]; spec = Object.assign({}, pr.tier === 'hut' && vv && vv.biome === 'snow' ? Object.assign({}, CIVIC.igloo, { value: HOME.hut.value }) : spec, { label: Civ.homeLabel(pr.tier, pr.vid) }); }
+  return spec;
+};
+// a saved project keeps only its site clearing; the rest of the blueprint is drawn again from the same lot
+Civ.regenBlocks = function (pr) {
+  const spec = Civ.specFor(pr); if (!spec) return null;
+  return blueprint({ x: pr.lot.x, z: pr.lot.z, vid: pr.vid, door: pr.lot.door }, spec, pr.kind === 'civic' ? 'civic' : pr.kind, true).list;
+};
+Civ.estimate = function (vid, tier) { const v = World.VBY[vid]; const spec = tier === 'hut' && v && v.biome === 'snow' ? CIVIC.igloo : HOME[tier]; return costOf(blueprint({ x: v ? v.cx : 0, z: v ? v.cz : 0, vid }, spec, 'home', true).list, vid); };
 
 Civ.startProject = function (owner, kind, opts) {
   const s = S(); const vid = owner ? owner.vid : opts.vid;
-  const spec = kind === 'home' ? HOME[opts.tier] : kind === 'shop' ? SHOP : kind === 'civic' ? CIVIC[opts.civic] : null;
+  const spec = Civ.specFor({ kind, tier: opts.tier, civic: opts.civic, vid });
   if (!spec) return null;
   const lot = s.small ? World.findGrowthLot(vid, spec.w, spec.d, (V(vid).stage || 0) * 3) : World.findLot(vid, spec.w + 0, spec.d + 0);
   if (!lot) { if (owner) Sim.setThought(owner, 'There is no land left to build on in ' + V(vid).name + '.'); return null; }
@@ -624,7 +957,7 @@ Civ.startProject = function (owner, kind, opts) {
   const siteId = 'site_' + id;
   s.extraPlaces[siteId] = { id: siteId, vid, name: label + ' (building site)', kind: 'site', spots: siteSpots.filter(([x, z]) => World.standY[x + z * World.W] >= 0), entry: bp.entry, center: [lot.x + (spec.w >> 1), lot.z + (spec.d >> 1)] };
   if (!s.extraPlaces[siteId].spots.length) s.extraPlaces[siteId].spots = [bp.entry];
-  const pr = { id, vid, kind, owner: owner ? owner.id : null, label, tier: opts.tier || null, civic: opts.civic || null, biz: opts.biz || null, lot: { x: lot.x, z: lot.z, w: spec.w, d: spec.d }, blocks: bp.list, stages: bp.stages, entry: bp.entry, i: 0,
+  const pr = { id, vid, kind, owner: owner ? owner.id : null, label, tier: opts.tier || null, civic: opts.civic || null, biz: opts.biz || null, lot: { x: lot.x, z: lot.z, w: spec.w, d: spec.d, door: lot.door }, blocks: bp.list, clearN: bp.stages.length > 1 ? bp.stages[1][1] : 0, stages: bp.stages, entry: bp.entry, i: 0,
     site: {}, escrow: opts.escrow !== undefined ? opts.escrow : cost, cost, siteId, started: s.t, done: false, waiting: null, crew: [], value: spec.value,
     why: opts.why || (kind === 'home' ? owner.name + ' saved up ' + cost + ' coins for a ' + spec.label : kind === 'shop' ? (owner ? owner.name : 'A resident') + ' is opening ' + opts.name : kind === 'civic' ? V(vid).name + ' grew and voted for a ' + spec.label : 'Repairs') };
   s.projects.push(pr);
@@ -759,11 +1092,11 @@ function finishProject(pr) {
       o.owns.push(prop.id);
       moveHome(o, pid, prop);
       o.stats.achieved++;
-      Civ.mind(o, o.name + ' moved into a new ' + HOME[pr.tier].label, 'build');
-      if (pr.tier === 'manor' || pr.tier === 'atelier' || pr.tier === 'civic') Civ.history(o.name + ' finished a ' + HOME[pr.tier].label + ' in ' + Vv.name, pr.vid, 'build');
+      Civ.mind(o, o.name + ' moved into a new ' + Civ.homeLabel(pr.tier, pr.vid), 'build');
+      if (pr.tier === 'manor' || pr.tier === 'atelier' || pr.tier === 'civic') Civ.history(o.name + ' finished a ' + Civ.homeLabel(pr.tier, pr.vid) + ' in ' + Vv.name, pr.vid, 'build');
       else if (!s.history.some(h => h.kind === 'build' && h.vid === pr.vid)) Civ.history('The first new home in ' + Vv.name + ' was finished: ' + o.name + '\'s ' + HOME[pr.tier].label, pr.vid, 'build');
     }
-    Sim.emit({ type: 'BUILDING_CREATED', vid: pr.vid, actor: pr.owner, imp: 0.75, public: true, val: 0.2, x: pr.lot.x + 3, z: pr.lot.z + 3, headline: (o ? o.name.toUpperCase() + ' MOVES INTO A NEW ' : 'NEW ') + HOME[pr.tier].label.toUpperCase(), text: (o ? o.name : 'Someone') + ' finished building a ' + HOME[pr.tier].label + ' in ' + Vv.name + '.' });
+    Sim.emit({ type: 'BUILDING_CREATED', vid: pr.vid, actor: pr.owner, imp: 0.75, public: true, val: 0.2, x: pr.lot.x + 3, z: pr.lot.z + 3, headline: (o ? o.name.toUpperCase() + ' MOVES INTO A NEW ' : 'NEW ') + Civ.homeLabel(pr.tier, pr.vid).toUpperCase(), text: (o ? o.name : 'Someone') + ' finished building a ' + Civ.homeLabel(pr.tier, pr.vid) + ' in ' + Vv.name + '.' });
   } else if (pr.kind === 'shop') {
     const biz = s.businesses[pr.biz];
     const sells = biz ? BIZ[biz.kind].sells : ['bread', 'tools'];
@@ -1704,7 +2037,7 @@ const STAGES = [
 ];
 Civ.STAGES = STAGES;
 // how many people a settlement can draw at each stage
-const POP_CAP = [12, 20, 30, 48, 70];
+const POP_CAP = [12, 20, 30, 50, 100];
 const popCap = (vid) => POP_CAP[stageIdx(vid)] || 54;
 Civ.popCap = popCap;
 const CAMP_STOCK = { food: 45, wood: 40, stone: 24, iron: 2, coal: 4, clay: 6, wool: 4, gold: 0 };
@@ -2078,6 +2411,17 @@ Civ.growth = function (vid) {
     const pr = Civ.startProject(null, 'civic', { vid, civic: want, escrow: pay, why: (mayor ? 'Mayor ' + mayor.name + ': ' : '') + Vv.name + ' is a ' + Vv.tier.toLowerCase() + ' now and needs a ' + CIVIC[want].label.toLowerCase() });
     if (pr) { if (mayor) Civ.mind(mayor, mayor.name + ' commissioned a ' + CIVIC[want].label + ' for ' + Vv.name, 'politics'); return pr; }
   }
+  // 3b. landmarks: one at a time, when the settlement has the stage, the land and the money for it
+  const vdef = World.VBY[vid];
+  if (Vv.town.treasury > 40 && !open.some(p => p.civic && CIVIC[p.civic] && CIVIC[p.civic].gen)) {
+    for (const [c, minSt, ok] of LANDMARKS) {
+      if (st < minSt || !ok(vdef) || have(c) > 0) continue;
+      const pay = Math.max(0, Math.min(Vv.town.treasury - 30, CIVIC[c].cost)); Vv.town.treasury -= pay;
+      const pr = Civ.startProject(null, 'civic', { vid, civic: c, escrow: pay, why: (mayor ? 'Mayor ' + mayor.name + ': ' : '') + Vv.name + ' wants a ' + CIVIC[c].label.toLowerCase() + ' of its own' });
+      if (pr) { if (mayor) Civ.mind(mayor, mayor.name + ' commissioned a ' + CIVIC[c].label + ' for ' + Vv.name, 'politics'); Civ.history(Vv.name + ' began building a ' + CIVIC[c].label, vid, 'build'); return pr; }
+      Vv.town.treasury += pay; break;
+    }
+  }
   // 4. the well-off upgrade: bigger homes for those who can afford them
   if (st >= 2) {
     const rich = L.filter(a => a.money > 140 && (a.debt || 0) < 120 && !s.projects.some(p => !p.done && p.owner === a.id) && !a.owns.some(id => { const pp = s.properties[id]; return pp && pp.kind === 'house' && ['manor', 'townhouse', 'cityhouse', 'stone'].includes(pp.tier); })).sort((x, y) => y.money - x.money)[0];
@@ -2095,7 +2439,8 @@ Civ.growth = function (vid) {
 
 // ---------- stages ----------
 // wealth: coins in pockets, the treasury and the bank, plus what the settlement's buildings are worth
-function wealthOf(vid) { const s = S(); const Vv = V(vid); let prop = 0; for (const id in s.properties) { const p = s.properties[id]; if (p.vid === vid) prop += (p.value || 0) * (p.condition || 1); } return Math.round(people(vid).reduce((x, a) => x + Math.max(0, a.money), 0) + Math.max(0, Vv.town.treasury) + bankTotal(vid) + prop); }
+function wealthOf(vid) { const s = S(); const Vv = V(vid); let prop = 0; for (const id in s.properties) { const p = s.properties[id]; if (p.vid === vid) prop += (p.value || 0) * (p.condition || 1); }
+  /* public buildings and landmarks belong to the settlement */ for (const c of Vv.civic || []) prop += (CIVIC[c] && CIVIC[c].value) || 0; return Math.round(people(vid).reduce((x, a) => x + Math.max(0, a.money), 0) + Math.max(0, Vv.town.treasury) + bankTotal(vid) + prop); }
 Civ.wealthOf = wealthOf;
 Civ.stageReport = function (vid) {
   const Vv = V(vid); const L = people(vid); const cur = Vv.stage || 0; const next = STAGES[cur + 1];
@@ -2174,7 +2519,7 @@ Civ.roadTick = function (a) {
     // lamp posts along town streets
     if (Vv.stage >= 3 && Vv.roadsPaved % 14 === 0) {
       for (const [lx, lz] of [[x + 1, z], [x - 1, z], [x, z + 1], [x, z - 1]]) {
-        if (World.get(lx, World.GROUND, lz) !== B.GRASS || World.get(lx, World.STAND, lz)) continue;
+        if (World.get(lx, World.GROUND, lz) !== World.groundOf(a.vid) || World.get(lx, World.STAND, lz)) continue;
         World.set(lx, World.STAND, lz, B.FENCE, { by: a.id }); World.set(lx, World.STAND + 1, lz, B.FENCE, { by: a.id }); World.set(lx, World.STAND + 2, lz, B.TORCH, { by: a.id }); break;
       }
     }

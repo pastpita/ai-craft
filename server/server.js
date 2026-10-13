@@ -16,6 +16,7 @@ const { Sim, Civ, Sync } = globalThis.AV;
 const PORT = +process.env.PORT || 8787;
 const DB_URL = process.env.DATABASE_URL || '';
 const FILE = process.env.AV_FILE || path.join(__dirname, 'world-data.json');
+const DIR = process.env.AV_DIR || path.join(path.dirname(FILE), 'world-docs');
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const MODEL = process.env.AV_MODEL || 'claude-haiku-5-5';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -24,20 +25,33 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const Store = {
   pool: null,
   async init() {
-    if (!DB_URL) { log('storage: file', FILE); return; }
+    if (!DB_URL) { log('storage: files in', DIR); return; }
     const { Pool } = require('pg');
     this.pool = new Pool({ connectionString: DB_URL, max: 4 });
     await this.pool.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
     log('storage: postgres');
   },
+  // file mode: one file per document in DIR, so a save writes only what changed
   async loadAll() {
-    if (!this.pool) { if (this.mem) return this.mem; try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { return {}; } }
+    if (!this.pool) {
+      if (this.mem) return this.mem;
+      const out = {};
+      try { for (const f of fs.readdirSync(DIR)) if (f.endsWith('.json')) { try { out[decodeURIComponent(f.slice(0, -5))] = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8')); } catch (e) { /* a broken file is skipped */ } } } catch (e) { /* no directory yet */ }
+      if (!Object.keys(out).length) { try { Object.assign(out, JSON.parse(fs.readFileSync(FILE, 'utf8'))); } catch (e) { /* nothing saved yet */ } }
+      return out;
+    }
     const r = await this.pool.query('select key, body from world_docs');
     const out = {}; for (const row of r.rows) out[row.key] = row.body; return out;
   },
   async saveDocs(docs) {
     const keys = Object.keys(docs); if (!keys.length) return;
-    if (!this.pool) { if (!this.mem) this.mem = await this.loadAll(); Object.assign(this.mem, docs); await fs.promises.writeFile(FILE + '.tmp', JSON.stringify(this.mem)); await fs.promises.rename(FILE + '.tmp', FILE); return; }
+    if (!this.pool) {
+      if (!this.mem) this.mem = await this.loadAll();
+      Object.assign(this.mem, docs);
+      await fs.promises.mkdir(DIR, { recursive: true });
+      for (const k of keys) { const f = path.join(DIR, encodeURIComponent(k) + '.json'); await fs.promises.writeFile(f + '.tmp', JSON.stringify(docs[k])); await fs.promises.rename(f + '.tmp', f); }
+      return;
+    }
     const c = await this.pool.connect();
     try {
       await c.query('begin');
@@ -58,7 +72,7 @@ const Store = {
     for (const r of rows) await this.pool.query('insert into world_metrics (world_id, day, population, wealth, buildings, houses_built, blocks_placed, blocks_mined, trees_cut, crops_harvested, farm_tiles, trade_volume, businesses, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) on conflict (world_id, day) do update set data = excluded.data', [worldId, r.d, r.pop, r.wealth, r.bld, r.housesBuilt, r.blocksPlaced, r.blocksMined, r.treesCut, r.cropsHarvested, r.farmTiles, Math.round(r.tradeVolume || 0), r.biz, JSON.stringify(r)]);
     if (totals) await this.pool.query('insert into world_metrics_totals (world_id, totals, updated_at) values ($1, $2, now()) on conflict (world_id) do update set totals = excluded.totals, updated_at = now()', [worldId, JSON.stringify(totals)]);
   },
-  async wipe() { this.mem = null; if (this.pool) await this.pool.query('delete from world_docs'); else try { fs.unlinkSync(FILE); } catch (e) { /* none */ } },
+  async wipe() { this.mem = null; if (this.pool) await this.pool.query('delete from world_docs'); else { try { fs.unlinkSync(FILE); } catch (e) { /* none */ } try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) { /* none */ } } },
 };
 
 // ---------------- the world ----------------
@@ -124,10 +138,10 @@ function startLoops() {
     ticking = false;
   }, 250);
   setInterval(broadcastFrame, 1000);
-  setInterval(() => persist(false).catch(e => log('persist error', e.message)), 15000);
+  setInterval(() => persist(false).catch(e => log('persist error', e.message)), +process.env.AV_SAVE_MS || 45000);
   let shardI = 0;
   setInterval(() => { const n = Sync.shards(S); const k = shardI++ % n; send({ k: 'doc', key: 'agents/s' + k, body: Sync.shardDoc(S, k) }); }, 2000);
-  setInterval(() => { send({ k: 'doc', key: 'world/core', body: Sync.coreDoc(S) }); send({ k: 'doc', key: 'world/feed', body: Sync.feedDoc(S) }); }, 10000);
+  setInterval(() => { send({ k: 'doc', key: 'world/core', body: Sync.coreDoc(S) }); send({ k: 'doc', key: 'world/estate', body: Sync.estateDoc(S) }); send({ k: 'doc', key: 'world/feed', body: Sync.feedDoc(S) }); }, 10000);
   setInterval(llmTick, 20000);
 }
 function broadcastFrame() {

@@ -49,7 +49,7 @@ You can walk the world in first person, fly over it as a spectator, click anyone
 |:--|:--|:--|
 | **Visible work**<br>Villagers till grass into farmland, plant, tend and harvest wheat, chop trees, mine ore, haul loads and place buildings block by block. | **Real decisions**<br>A utility engine weighs needs, goals, beliefs, relationships and personality. Every decision is logged with its inputs. | **Inspect any mind**<br>Current task and reason, needs, personality, memory, beliefs (true or false), skills, inventory and relationships. |
 | **Memory that fades**<br>Importance × emotion × recency. Each mind holds only as much as its capacity allows; the rest is forgotten or summarised. | **Beliefs ≠ truth**<br>Rumours carry provenance hop by hop and can grow in the retelling. The world knows what really happened; villagers do not. | **Economy from the ground up**<br>Resource sites, storehouses, prices from stock, bakers and smiths, shops, businesses, wages, rent and loans. |
-| **Villages grow**<br>New homes on free plots, new fields, workshops and civic buildings. Hamlet → Village → Town → City. | **Politics and crime**<br>Elections, campaigns, policies, thefts, witnesses, false testimony, investigations and wrongful arrests. | **One shared world**<br>One clock for everyone (a world day = 20 real minutes), persistent history, offline catch-up. |
+| **Villages grow**<br>New homes on free plots, new fields, workshops and civic buildings. Hamlet → Village → Town → City. | **Politics and crime**<br>Elections, campaigns, policies, thefts, witnesses, false testimony, investigations and wrongful arrests. | **One shared world**<br>One clock for everyone (a world day = 40 real minutes), persistent history, offline catch-up. |
 | **A brain you can watch**<br>The homepage brain is built from the same blocks as the world. Each decision a villager makes runs across it as a line of light, with a card naming who decided what. | **Builders adapt**<br>When the storehouse runs out of clay or stone, builders change the plan and finish in what the village has. Owners who run short borrow from the village. | **The world in numbers**<br>Minds awake, decisions per minute, memories, conversations, beliefs, bonds, blocks placed, harvests and buildings, all counted live. |
 
 ---
@@ -206,15 +206,48 @@ flowchart LR
 
 Once a town has a bank and a banker, savers deposit their surplus (a little interest each day), owners take **home and business loans** when savings fall short, repayments come out of wages, and a borrower who misses six days defaults: the debt is written off and the property goes up for sale. Before there is a bank, the village treasury lends.
 
-### Five villages
+### Five settlements, five biomes
 
-| Village | Identity | Works |
-|---|---|---|
-| **Highvale** | Politics and learning, home of the Academy | wheat, timber, quarry stone |
-| **Ironridge** | Mines, forges and money | iron, coal, stone, a seam of gold |
-| **Rivergate** | Traders and news on the river | fish, clay, wheat |
-| **Greenhollow** | A farming cooperative | wheat, wool, timber |
-| **Ashfield** | Poor, restless and quick with a knife | stone, scrub timber |
+The valley is 320 × 320 blocks and 60 high. Each settlement lives in its own land and builds in its own style:
+
+| Settlement | Biome | Builds with | Works |
+|---|---|---|---|
+| **Highvale** | Snowy taiga under a quarry hill: spruce forests, snowdrifts | spruce, stone brick, steep slate roofs; first homes are igloos | wheat, timber, quarry stone; politics and the Academy |
+| **Ironridge** | Badlands at the foot of the mountain: red sand, banded terracotta mesas | terracotta, dark timber, hip roofs | iron, coal, stone, a seam of gold |
+| **Rivergate** | River swamp: pools, reeds, vine-hung oaks | mud brick, timber, tile and thatch | fish, clay, wheat; trade and news |
+| **Greenhollow** | Flower meadows with oak and birch | timber frame, plaster, thatch | wheat, wool, timber |
+| **Ashfield** | Desert dunes with cacti and a palm oasis | sandstone, flat roofs with parapets | stone, palm timber |
+
+Beyond them: a snow-capped mountain range, a lake with sandy shores and a jungle of giant trees in the south-west.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/biome-map.png" alt="Map of the valley with its five biomes"></td>
+<td width="50%"><img src="assets/screenshots/city-ironridge.png" alt="Ironridge, a badlands city at the foot of the mountain"></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshots/city-ashfield.png" alt="Ashfield, a desert city with flat roofs, a pyramid and a cathedral"></td>
+<td width="50%"><img src="assets/screenshots/city-highvale.png" alt="Highvale, a snowy city with spruce roofs"></td>
+</tr>
+<tr>
+<td align="center" colspan="2">Day 150 of a test world: every block placed by residents</td>
+</tr>
+</table>
+
+### Landmarks
+
+When a settlement has the stage, the land and the treasury for it, it raises a landmark of its own, block by block like any other building:
+
+| Stage | Landmarks |
+|---|---|
+| Hamlet | windmill (meadow, swamp, badlands) |
+| Village | fountain, statue on a pedestal, lighthouse (Rivergate) |
+| Town | clock tower, observatory with a glass dome (Highvale), greenhouse, step pyramid with a burial chamber (Ashfield) |
+| City | cathedral with stained glass and a bell tower, castle keep with turrets (Ironridge, Highvale), arena with tiered seating |
+
+<p align="center"><img src="assets/screenshots/landmarks.png" alt="Pyramid, cathedral, castle keep and arena" width="80%"></p>
+
+Homes grow with their owners too: huts, cottages, stone houses, manors with turrets, two- and three-storey town and city houses with balconies, chimneys and lanterns, all in the local materials.
 
 Each has its own mayor, election, guard, newspaper, treasury, stock, prices, tier and tech level. Villages trade, carry each other's news and keep relations scores.
 
@@ -324,7 +357,7 @@ sequenceDiagram
       H-->>V: frame (positions, actions) · speech · events · tasks · block edits
     end
     loop every few seconds
-      H->>DB: world/core · world/civ · world/feed · agents/sN · edits · history · snapshots
+      H->>DB: world/core · world/estate · world/civ · world/feed · agents/sN · edits · history · snapshots
     end
     V->>H: visitor action (talk, give, tell, build)
     H-->>V: result
@@ -334,7 +367,8 @@ sequenceDiagram
 | Document | Contents |
 |---|---|
 | `world/meta` | world id, clock anchor, save sequence |
-| `world/core` | villages, shops, properties, businesses, projects (planned buildings by reference, others packed), fields, crops, nodes, players |
+| `world/core` | villages, shops, businesses, projects (blueprints by reference: only the site clearing is stored), fields, crops, nodes, players |
+| `world/estate` | every place and property built during play |
 | `world/civ` | the growth record: master-plan state, metrics, daily totals, reports, milestones, building records |
 | `snaps/dN` | aerial snapshot of the valley on day N (one byte per column) |
 | `world/feed` | events, mind feed, newspapers, conversation log |
@@ -412,6 +446,7 @@ docs/                design notes: style update, brand, behaviour, shared world
 - [x] Bank with deposits, home and business loans, defaults
 - [x] Transporters, road builders, bankers; paved streets and lamps
 - [x] World metrics, daily and weekly reports, Then / Now aerial snapshots, share card
+- [x] A larger valley with five biomes, local building styles and eleven kinds of landmark
 - [ ] Districts that emerge from what is built where
 - [ ] Bridges and new neighbourhoods across the river
 - [ ] Seasons and weather that change crops and routines

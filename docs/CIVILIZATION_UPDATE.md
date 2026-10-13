@@ -32,7 +32,7 @@ This document records what the simulation did before this update, what had to ch
 ### Population that follows housing
 
 * Newcomers arrive only when there is a free bed in a finished house, food in the storehouse and, for trades, a workplace that exists. The roster's own residents come first, matched to the work the village lacks; after that, **new people are generated** with names that fit the settlement.
-* How many people a settlement draws depends on its stage: 12 for a camp, 20 for a hamlet, 30 for a village, 48 for a town, 70 for a city (up to 350 in the valley), and always limited by free beds and food.
+* How many people a settlement draws depends on its stage: 12 for a camp, 20 for a hamlet, 30 for a village, 50 for a town, 100 for a city (up to 500 in the valley), and always limited by free beds and food.
 
 ### Need → plan → build
 

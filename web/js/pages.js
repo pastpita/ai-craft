@@ -481,7 +481,7 @@ function renderHome(first) {
   }
   // persistent world
   const tiers = W.VILLAGES.map(v => [v, s.villages[v.id]]);
-  $('hDay').innerHTML = `<div class="big"><small>WORLD DAY</small>${Sim.dayOf(s.t)}</div><div style="color:var(--muted);font-size:14.5px;line-height:1.5">One clock for everyone: a world day lasts 20 real minutes. Close the tab and the villages keep working; come back to what changed.</div>${tiers.map(([v, Vv]) => `<div class="tierrow"><span>${esc(v.name)}</span><span class="bar"><i style="width:${Math.min(100, Math.round((Vv.tierScore || 0) / 58 * 100))}%;background:${v.color}"></i></span><b class="mono" style="font-size:12px">${esc(Vv.tier)}</b></div>`).join('')}`;
+  $('hDay').innerHTML = `<div class="big"><small>WORLD DAY</small>${Sim.dayOf(s.t)}</div><div style="color:var(--muted);font-size:14.5px;line-height:1.5">One clock for everyone: a world day lasts 40 real minutes. Close the tab and the villages keep working; come back to what changed.</div>${tiers.map(([v, Vv]) => `<div class="tierrow"><span>${esc(v.name)}</span><span class="bar"><i style="width:${Math.min(100, Math.round((Vv.tierScore || 0) / 58 * 100))}%;background:${v.color}"></i></span><b class="mono" style="font-size:12px">${esc(Vv.tier)}</b></div>`).join('')}`;
   const hist = s.history.filter(h => !h.minor && ['founding', 'growth', 'build', 'business', 'milestone', 'world'].includes(h.kind)).slice(-10).reverse();
   $('hHist').innerHTML = `<ul class="timeline">${hist.map(h => `<li class="major"><span class="d">DAY ${h.day} \u00B7 ${esc(String(h.kind || '').toUpperCase())}</span>${h.vid ? UI.vtag(h.vid) : ''}<div class="tx">${esc(h.text)}</div></li>`).join('')}</ul><button class="btn plank" id="hHistAll" style="margin-top:10px">Full world history</button>`;
   $('hHistAll').onclick = () => Pages.go('history');
@@ -617,7 +617,7 @@ function buildMapBase() {
   const g = cv.getContext('2d'); const img = g.createImageData(W.W, W.D);
   for (let z = 0; z < W.D; z++) for (let x = 0; x < W.W; x++) {
     const [y, b] = W.topBlockColor(x, z);
-    const c = BCOL[b] || '#555';
+    const c = BCOL[b] || (W.BLOCKS[b] && W.BLOCKS[b].col) || '#555';
     const n = parseInt(c.slice(1), 16); const sh = 0.72 + Math.min(0.5, (y - W.GROUND) * 0.045);
     const i = (z * W.W + x) * 4; img.data[i] = Math.min(255, (n >> 16 & 255) * sh); img.data[i + 1] = Math.min(255, (n >> 8 & 255) * sh); img.data[i + 2] = Math.min(255, (n & 255) * sh); img.data[i + 3] = 255;
   }

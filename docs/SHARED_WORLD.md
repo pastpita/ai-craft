@@ -84,7 +84,7 @@ create index on world_events (day);
 | Visitor actions | WS `rpc` → server executes → reply | Room `rpc` topic → authority tab executes → reply |
 | Offline time | Server never stops | Next authority replays the gap: fine simulation for the last 6 world hours, a cheap **macro-day model** for days before that |
 
-**World clock:** `t = t0 + (Date.now() − epochReal) / 1000 × 1.2` world minutes. Everyone computes the same time; 1 world day = 20 real minutes.
+**World clock:** `t = t0 + (Date.now() − epochReal) / 1000 × 0.6` world minutes. Everyone computes the same time; 1 world day = 40 real minutes.
 
 **Frames** (1 Hz, ≤ 4 KB): `[agentIndex, x×10, z×10, dir×100, flags, carry]` for every resident + heartbeat counters. Followers dead-reckon between frames.
 **Reconnect:** show *SYNCING WORLD…*, read all docs, subscribe, resume. The world is never reset by a client.

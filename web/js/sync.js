@@ -8,11 +8,11 @@ const World = root.World || require('./world.js');
 const Sync = AV.Sync = {};
 const Sim = () => AV.Sim;
 
-Sync.RATE = 1.2;                 // world minutes per real second: one world day = 20 real minutes
+Sync.RATE = 0.6;                 // world minutes per real second: one world day = 40 real minutes
 Sync.SHARD = 6;                  // residents per agents/ doc
 Sync.EDIT_DOCS = 16;
 Sync.HIST_PAGE = 400;
-Sync.SCHEMA = 3;
+Sync.SCHEMA = 4;
 
 const R2 = (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v);
 const clone = (o) => JSON.parse(JSON.stringify(o, R2));
@@ -69,19 +69,24 @@ Sync.coreDoc = function (s) {
   const villages = {};
   for (const vid in s.villages) {
     const v = s.villages[vid];
-    villages[vid] = Object.assign({}, v, { econ: Object.assign({}, v.econ, { hist: v.econ.hist.slice(-24).map(round2), wilted: (v.econ.wilted || []).slice(-10) }), roadQueue: (v.roadQueue || []).slice(0, 160),
+    villages[vid] = Object.assign({}, v, { econ: Object.assign({}, v.econ, { hist: v.econ.hist.slice(-16).map(round2), wilted: (v.econ.wilted || []).slice(-10) }), roadQueue: (v.roadQueue || []).slice(0, 160),
       town: v.town ? Object.assign({}, v.town, { policyLog: (v.town.policyLog || []).slice(-12) }) : v.town });
   }
   // blueprints: a planned building's blocks come from the master plan; others are packed as text
-  const projects = s.projects.filter(p => !p.done || s.t - (p.finished || 0) < 3 * 1440).map(p => p.done ? Object.assign({}, p, { blocks: [] }) : p.plan ? Object.assign({}, p, { blocks: [], packed: 'plan' }) : Object.assign({}, p, { blocks: Sync.packBlocks(p.blocks), packed: 'text' }));
+  const regen = (p) => p.clearN !== undefined && AV.Civ && AV.Civ.specFor && ['home', 'shop', 'civic'].includes(p.kind) && AV.Civ.specFor(p);
+  const projects = s.projects.filter(p => !p.done || s.t - (p.finished || 0) < 3 * 1440).map(p => p.done ? Object.assign({}, p, { blocks: [] }) : p.plan ? Object.assign({}, p, { blocks: [], packed: 'plan' })
+    : regen(p) ? Object.assign({}, p, { blocks: [], packed: 'gen', clear: Sync.packBlocks(p.blocks.slice(0, p.clearN)) }) : Object.assign({}, p, { blocks: Sync.packBlocks(p.blocks), packed: 'text' }));
   const heat = { social: trimHeat(s.heat.social), crime: trimHeat(s.heat.crime) };
   return clone({
-    v: s.v, worldId: s.worldId, t: s.t, nextId: s.nextId, players: s.players, crimes: s.crimes.slice(-60), cases: s.cases.slice(-40),
-    projects, secrets: s.secrets, farms: s.farms || {}, fields: s.fields || [], shops: s.shops, villages, extraPlaces: packPlaces(s.extraPlaces), properties: s.properties, businesses: s.businesses,
-    loans: s.loans.slice(-80), nodes: s.nodes, relations: s.relations, counters: s.counters, weather: s.weather, heat, statsHist: (s.statsHist || []).slice(-40),
+    v: s.v, worldId: s.worldId, t: s.t, nextId: s.nextId, players: s.players, crimes: s.crimes.slice(-40), cases: s.cases.slice(-30),
+    projects, secrets: s.secrets, farms: s.farms || {}, fields: s.fields || [], shops: s.shops, villages, businesses: s.businesses,
+    loans: s.loans.slice(-50), nodes: s.nodes, relations: s.relations, counters: s.counters, weather: s.weather, heat, statsHist: (s.statsHist || []).slice(-40),
     nAgents: s.agents.length,
   });
 };
+// every place and property built during play: its own document, since a city has hundreds
+Sync.estateDoc = (s) => clone({ extraPlaces: packPlaces(s.extraPlaces || {}), properties: s.properties || {} });
+Sync.applyEstate = function (s, body) { if (!body) return; if (body.extraPlaces) s.extraPlaces = body.extraPlaces; if (body.properties) s.properties = body.properties; Sync.unpackPlaces(s); };
 // finished buildings: their standing spots are recomputed from the lot on load
 function packPlaces(ep) {
   const o = {};
@@ -137,6 +142,7 @@ Sync.unpackBlocks = (str) => !str ? [] : str.split(',').map(t => t.split('.').ma
 Sync.hydrateProjects = function (s) {
   for (const p of s.projects || []) {
     if (p.packed === 'plan') { const P = World.plan[p.plan]; const sw = p.swap || {}; p.blocks = P ? P.blocks.map(b => (sw[b[3]] !== undefined ? [b[0], b[1], b[2], sw[b[3]]] : b)) : []; }
+    else if (p.packed === 'gen') { const sw = p.swap || {}; const rest = (AV.Civ.regenBlocks(p) || []).map(b => { let k = b[3]; for (let n = 0; n < 4 && k && sw[k] !== undefined; n++) k = sw[k]; return k === b[3] ? b : [b[0], b[1], b[2], k]; }); p.blocks = Sync.unpackBlocks(p.clear).concat(rest); delete p.clear; }
     else if (p.packed === 'text' || typeof p.blocks === 'string') p.blocks = Sync.unpackBlocks(p.blocks);
     delete p.packed;
   }
@@ -152,7 +158,8 @@ Sync.civDoc = function (s) {
 };
 // aerial snapshot of the valley: one byte per column, the top block's class (high nibble) and its height (low nibble)
 const SNAP_CLASS = (() => {
-  const B = World.B, c = new Uint8Array(64).fill(15);
+  const B = World.B, c = new Uint8Array(256).fill(15);
+  World.BLOCKS.forEach((b, i) => { if (b.snap !== undefined) c[i] = b.snap; });
   const set = (k, ...ids) => ids.forEach(i => { if (i !== undefined) c[i] = k; });
   set(0, 0); set(1, B.GRASS); set(2, B.DIRT, B.FARMLAND); set(3, B.STONE, B.COBBLE, B.ORE, B.COAL_ORE, B.GOLD_ORE); set(4, B.WATER); set(5, B.SAND, B.CLAY);
   set(6, B.LOG); set(7, B.LEAVES); set(8, B.PLANKS, B.DOOR, B.FENCE, B.SHELF); set(9, B.PATH); set(10, B.BRICK, B.ROOF_TILE, B.OVEN);
@@ -163,7 +170,7 @@ Sync.snapshot = function (day) {
   const W = World.W, D = World.D; const px = new Uint8Array(W * D);
   for (let z = 0; z < D; z++) for (let x = 0; x < W; x++) { const [y, b] = World.topBlockColor(x, z); px[x + z * W] = (SNAP_CLASS[b] << 4) | Math.max(0, Math.min(15, y - (World.GROUND - 3))); }
   let str = ''; for (let i = 0; i < px.length; i += 0x8000) str += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
-  return { d: day, w: W, h: D, v: 2, px: typeof btoa === 'function' ? btoa(str) : Buffer.from(str, 'binary').toString('base64') };
+  return { d: day, w: W, h: D, v: 2, wid: AV.Sim && AV.Sim.S() ? AV.Sim.S().worldId : undefined, px: typeof btoa === 'function' ? btoa(str) : Buffer.from(str, 'binary').toString('base64') };
 };
 Sync.SNAP_DAYS = [1, 2, 3, 5, 7, 10, 14, 20, 30, 45, 60, 90, 120];
 Sync.isSnapDay = (d) => Sync.SNAP_DAYS.includes(d) || (d > 120 && d % 30 === 0);
@@ -180,6 +187,7 @@ Sync.allDocs = function (s, meta) {
   docs['world/feed'] = Sync.feedDoc(s);
   docs['world/rumors'] = Sync.rumorsDoc(s);
   docs['world/civ'] = Sync.civDoc(s);
+  docs['world/estate'] = Sync.estateDoc(s);
   for (let k = 0; k < shardsOf(s); k++) docs['agents/s' + k] = Sync.shardDoc(s, k);
   for (const e of Sync.editDocs()) docs['edits/e' + e.k] = e;
   for (const p of Sync.historyPages(s)) docs['history/h' + p.k] = p;
@@ -196,7 +204,7 @@ Sync.build = function (docs, opts) {
   const core = docs['world/core'], feed = docs['world/feed'] || {}, rum = docs['world/rumors'] || {};
   if (!core) return null;
   World.clearEdits(); World.generate(4242);
-  const civ = docs['world/civ'] || {};
+  const civ = docs['world/civ'] || {}, estate = docs['world/estate'] || {};
   // a world that started as camps: un-build the master plan first, then lay the saved edits on top
   if (civ.plan && AV.Civ && AV.Civ.replayPlan) AV.Civ.replayPlan(civ);
   const edits = {}; for (const key in docs) if (key.startsWith('edits/')) Object.assign(edits, Sync.decodeEdits(docs[key]));
@@ -209,6 +217,8 @@ Sync.build = function (docs, opts) {
     rumors: rum.rumors || {}, convos: {}, away: [], econ: null, town: null, election: null, flags: null,
     history: [],
   }, civ);
+  if (estate.extraPlaces) s.extraPlaces = estate.extraPlaces; if (estate.properties) s.properties = estate.properties;
+  s.extraPlaces = s.extraPlaces || {}; s.properties = s.properties || {};
   const pages = Object.keys(docs).filter(k => k.startsWith('history/')).sort((a, b) => +a.slice(9) - +b.slice(9));
   for (const k of pages) s.history.push(...(docs[k].items || []));
   for (const a of agents) { s.byId[a.id] = a; a.path = null; a.convo = null; a.memories = a.memories || []; a.beliefs = a.beliefs || []; }

@@ -1,6 +1,6 @@
 # AI CRAFT — shared-world server
 
-One authoritative simulation for every visitor: one world clock (1 world day = 20 real minutes),
+One authoritative simulation for every visitor: one world clock (1 world day = 40 real minutes),
 PostgreSQL persistence, WebSocket fan-out. The browser client detects the server automatically
 (`GET /api/hello`) and becomes a follower that draws the server's frames.
 
@@ -12,7 +12,7 @@ DATABASE_URL=postgres://user:pass@localhost/aivillage PORT=8787 npm start
 # open http://localhost:8787
 ```
 
-Without `DATABASE_URL` the server keeps the world in `server/world-data.json`.
+Without `DATABASE_URL` the server keeps the world in `server/world-docs/`, one JSON file per document (`AV_DIR` to move it). A save writes only the documents that changed, every 45 s (`AV_SAVE_MS`).
 
 | Env | Meaning |
 |---|---|

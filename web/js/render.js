@@ -6,7 +6,7 @@
 const AV = root.AV = root.AV || {};
 const W = root.World, THREE = root.THREE;
 const R = AV.Render = {};
-const TILE = 16, COLS = 8, ROWS = 5;
+const TILE = 16, COLS = 8, ROWS = 10;
 
 // ---------------- texture atlas ----------------
 function rng(seed) { let s = seed; return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
@@ -84,6 +84,72 @@ function paintAtlas() {
   { const r = rng(3131); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const strand = (x + Math.floor(y / 3)) % 3 === 0 ? 0.78 : 1; px(31, x, y, shade(hex('#c9a65a'), strand * (y % 4 === 3 ? 0.8 : 1) * (0.9 + r() * 0.18))); } }
   // 32 sprout (cutout): young wheat shoots
   { const r = rng(3232); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(32, x, y, [0, 0, 0], 0); for (let k = 0; k < 5; k++) { const x = 1 + k * 3 + Math.floor(r() * 2); const top = 9 + Math.floor(r() * 3); for (let y = top; y < 16; y++) px(32, x, y, hex(y < top + 2 ? '#9ad35a' : '#5f9e37')); px(32, x + 1, top + 1, hex('#86c955')); } }
+  // ---- biomes ----
+  const fill = (t, f) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const c = f(x, y); if (c) px(t, x, y, c[0], c[1]); } };
+  const clear = (t) => fill(t, () => [[0, 0, 0], 0]);
+  // 33 snow
+  noiseFill(33, '#eef3f6', 0.08, 3333); { const r = rng(33); for (let i = 0; i < 14; i++) px(33, Math.floor(r() * 16), Math.floor(r() * 16), hex('#d6e2ea')); }
+  // 34 snowy grass side: dirt under a thick snow cap
+  noiseFill(34, '#7a5636', 0.35, 3434); { const r = rng(34); for (let x = 0; x < 16; x++) { const d = 4 + Math.floor(r() * 3); for (let y = 0; y < d; y++) px(34, x, y, shade(hex('#eef3f6'), 0.92 + r() * 0.08)); } }
+  // 35 spruce log side, 36 spruce log top
+  { const r = rng(35); fill(35, (x, y) => [shade(hex('#4a3420'), (x % 3 === 0 ? 0.72 : 1) * (0.85 + r() * 0.25))]); }
+  fill(36, (x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); return [d > 7 ? hex('#3a2818') : shade(hex('#8a6a44'), Math.floor(d) % 3 === 0 ? 0.8 : 1)]; });
+  // 37 spruce leaves (cutout)
+  { const r = rng(37); fill(37, () => [shade(hex('#2f5a3a'), 0.75 + r() * 0.4), r() < 0.12 ? 0 : 255]); }
+  // 38 spruce planks
+  { const r = rng(38); fill(38, (x, y) => [shade(hex('#7a5634'), (y % 4 === 3 ? 0.68 : 1) * (x === ((y >> 2) * 5 + 3) % 16 ? 0.75 : 1) * (0.9 + r() * 0.15))]); }
+  // 39 birch log side: white bark, black marks
+  { const r = rng(39); fill(39, (x, y) => [((y * 7 + x * 3) % 11 === 0 && r() < 0.8) || (y % 5 === 2 && x > 3 && x < 7) ? hex('#2a2a26') : shade(hex('#e4e0d2'), 0.88 + r() * 0.12)]); }
+  // 40 birch log top
+  fill(40, (x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); return [d > 7 ? hex('#d8d4c4') : shade(hex('#c9b088'), Math.floor(d) % 3 === 0 ? 0.85 : 1)]; });
+  // 41 birch leaves
+  { const r = rng(41); fill(41, () => [shade(hex('#7fae4a'), 0.75 + r() * 0.4), r() < 0.14 ? 0 : 255]); }
+  // 42 cactus side, 43 cactus top
+  { const r = rng(42); fill(42, (x, y) => [x % 4 === 0 ? hex('#2f5a22') : (x % 4 === 2 && y % 5 === 1) ? hex('#e6e2b0') : shade(hex('#4f8a34'), 0.9 + r() * 0.15)]); }
+  fill(43, (x, y) => [x === 0 || y === 0 || x === 15 || y === 15 ? hex('#2f5a22') : (x + y) % 6 === 0 ? hex('#e6e2b0') : hex('#5c9a3e')]);
+  // 44 red sand
+  noiseFill(44, '#c46a32', 0.22, 4444);
+  // 45 terracotta, 46 white terracotta, 47 brown terracotta
+  noiseFill(45, '#b5603a', 0.1, 4545); noiseFill(46, '#d8c0a8', 0.08, 4646); noiseFill(47, '#7d4a33', 0.1, 4747);
+  // 48 sandstone side (layered), 49 sandstone top, 50 cut sandstone side
+  { const r = rng(48); fill(48, (x, y) => [shade(hex('#dcca92'), (y % 5 === 0 ? 0.85 : y < 3 ? 1.05 : 1) * (0.94 + r() * 0.08))]); }
+  noiseFill(49, '#e2d29c', 0.08, 4949);
+  fill(50, (x, y) => [y === 0 || y === 15 || y === 7 ? hex('#c4b07a') : (x === 0 || x === 15) ? hex('#cdb984') : hex('#e0cf98')]);
+  // 51 mud, 52 mud brick
+  noiseFill(51, '#4a3c30', 0.25, 5151);
+  { const r = rng(52); fill(52, (x, y) => { const row = y >> 2; const mortar = y % 4 === 3 || ((x + (row % 2) * 4) % 8 === 7); return [mortar ? hex('#6a5440') : shade(hex('#9a7c5c'), 0.88 + r() * 0.2)]; }); }
+  // 53 swamp grass top, 54 swamp grass side
+  noiseFill(53, '#55663a', 0.3, 5353); { const r = rng(53); for (let i = 0; i < 26; i++) px(53, Math.floor(r() * 16), Math.floor(r() * 16), hex(r() < .5 ? '#6a7a44' : '#43522e')); }
+  noiseFill(54, '#5e4430', 0.3, 5454); { const r = rng(54); for (let x = 0; x < 16; x++) { const d = 2 + Math.floor(r() * 3); for (let y = 0; y < d; y++) px(54, x, y, shade(hex('#55663a'), 0.85 + r() * 0.3)); } }
+  // 55 red flower, 56 yellow flower, 57 tall grass, 58 dead bush, 59 reeds, 60 vine (all cutout)
+  for (const t of [55, 56, 57, 58, 59, 60]) clear(t);
+  for (const [t, c] of [[55, '#d8402e'], [56, '#f0d040']]) { for (let y = 8; y < 16; y++) px(t, 7, y, hex('#4f8a2c')); px(t, 6, 11, hex('#4f8a2c')); px(t, 8, 12, hex('#4f8a2c')); for (const [a, b] of [[7, 5], [6, 6], [8, 6], [7, 7], [6, 4], [8, 4], [5, 6], [9, 6]]) px(t, a, b, hex(c)); px(t, 7, 6, hex('#f6e8a0')); }
+  { const r = rng(57); for (let k = 0; k < 9; k++) { const x = 1 + Math.floor(r() * 14), top = 3 + Math.floor(r() * 8); for (let y = top; y < 16; y++) px(57, x, y, shade(hex('#6aa83c'), 0.8 + r() * 0.3)); } }
+  { const r = rng(58); for (let k = 0; k < 7; k++) { let x = 7, y = 15; const dx = r() < .5 ? -1 : 1; for (let i = 0; i < 9; i++) { px(58, x & 15, y, hex('#8a6438')); y--; if (r() < 0.5) x += dx; } } }
+  { const r = rng(59); for (let k = 0; k < 6; k++) { const x = 1 + k * 2 + Math.floor(r() * 2), top = 1 + Math.floor(r() * 5); for (let y = top; y < 16; y++) px(59, x, y, hex(y < top + 2 ? '#7a5636' : '#6a8a3c')); } }
+  { const r = rng(60); for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) if ((x % 4 === 1 || x % 5 === 3) && r() < 0.8) px(60, x, y, shade(hex('#3f6a2a'), 0.8 + r() * 0.35)); }
+  // 61 jungle log side, 62 jungle log top, 63 jungle leaves
+  { const r = rng(61); fill(61, (x, y) => [shade(hex('#5a4426'), ((x + y * 3) % 5 === 0 ? 0.75 : 1) * (0.85 + r() * 0.25))]); }
+  fill(62, (x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); return [d > 7 ? hex('#4a3820') : shade(hex('#a8824e'), Math.floor(d) % 3 === 0 ? 0.8 : 1)]; });
+  { const r = rng(63); fill(63, () => [shade(hex('#2f7a26'), 0.7 + r() * 0.45), r() < 0.1 ? 0 : 255]); }
+  // 64 ice
+  { const r = rng(64); fill(64, (x, y) => [x - y === 3 || x - y === -6 ? hex('#d8ecfa') : shade(hex('#9cc4e8'), 0.92 + r() * 0.1)]); }
+  // 65 stained glass: lead lines and coloured panes
+  { const P = ['#c0392b', '#2e6fb8', '#e2b72e', '#3f9a4a', '#8a4ab0']; fill(65, (x, y) => (x % 5 === 0 || y % 5 === 0) ? [hex('#2a2a2e')] : [hex(P[((x / 5 | 0) + (y / 5 | 0) * 2) % P.length]), 210]); }
+  // 66 clock face
+  fill(66, (x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); if (d > 7.2) return [hex('#5f615c')]; if (d > 6.4) return [hex('#c9a020')]; if ((x === 7 || x === 8) && y >= 3 && y <= 8) return [hex('#1d1d1f')]; if (y === 8 && x >= 8 && x <= 11) return [hex('#1d1d1f')]; return [hex('#f2ead2')]; });
+  // 67 gold block
+  { const r = rng(67); fill(67, (x, y) => [x === 0 || y === 0 ? hex('#fff2a0') : x === 15 || y === 15 ? hex('#b08a18') : shade(hex('#f0c838'), 0.92 + r() * 0.12)]); }
+  // 68 dark planks
+  { const r = rng(68); fill(68, (x, y) => [shade(hex('#4a3222'), (y % 4 === 3 ? 0.65 : 1) * (x === ((y >> 2) * 5 + 3) % 16 ? 0.75 : 1) * (0.9 + r() * 0.15))]); }
+  // 69 mossy cobble
+  { const r = rng(69); fill(69, (x, y) => { const cx = (x + (Math.floor(y / 5) % 2) * 3) % 6, cy = y % 5; if (cx === 0 || cy === 0) return [hex('#4e5a44')]; return [r() < 0.35 ? shade(hex('#5f8a3c'), 0.85 + r() * 0.25) : shade(hex('#9a9c96'), 0.85 + r() * 0.25)]; }); }
+  // 70 marble top, 71 marble side (fluted)
+  { const r = rng(70); fill(70, (x, y) => [shade(hex('#ecebe4'), 0.95 + r() * 0.06)]); fill(71, (x, y) => [x % 4 === 0 ? hex('#cfcdc4') : shade(hex('#ecebe4'), 0.95 + r() * 0.05)]); }
+  // 72 copper roof (patina)
+  { const r = rng(72); fill(72, (x, y) => [y % 4 === 3 ? hex('#3f7a6a') : shade(hex(r() < 0.2 ? '#8a6a3a' : '#5fa08a'), 0.9 + r() * 0.15)]); }
+  // 73 lantern (cutout)
+  clear(73); fill(73, (x, y) => { if (x < 3 || x > 12 || y < 2 || y > 14) return null; if (x === 3 || x === 12 || y === 2 || y === 14 || y === 8) return [hex('#2a2a2e')]; return [hex(y < 8 ? '#ffe28a' : '#ffb440')]; });
   g.putImageData(img, 0, 0);
   return cv;
 }
@@ -235,7 +301,7 @@ R.init = function (scene) {
   R.atlasCanvas = atlas;
   const tex = new THREE.CanvasTexture(atlas);
   tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
-  R.uniforms = { map: { value: tex }, daylight: { value: 1 }, sunDir: { value: new THREE.Vector3(0.4, 0.8, 0.3).normalize() }, fogColor: { value: new THREE.Color('#9fc4d8') }, fogNear: { value: 40 }, fogFar: { value: 90 }, alpha: { value: 1 }, wave: { value: 0 }, skyTint: { value: new THREE.Color(1, 1, 1) } };
+  R.uniforms = { map: { value: tex }, daylight: { value: 1 }, sunDir: { value: new THREE.Vector3(0.4, 0.8, 0.3).normalize() }, fogColor: { value: new THREE.Color('#9fc4d8') }, fogNear: { value: 60 }, fogFar: { value: 140 }, alpha: { value: 1 }, wave: { value: 0 }, skyTint: { value: new THREE.Color(1, 1, 1) } };
   R.matOpaque = new THREE.ShaderMaterial({ uniforms: R.uniforms, vertexShader: VERT, fragmentShader: FRAG, side: THREE.FrontSide });
   const wu = Object.assign({}, R.uniforms, { alpha: { value: 0.78 }, wave: { value: 0.001 } });
   R.waterUniforms = wu;
@@ -333,9 +399,9 @@ R.updateSky = function (t, camPos, weather) {
   R.skyU.top.value.copy(top); R.skyU.horizon.value.copy(horizon);
   R.uniforms.fogColor.value.copy(horizon); R.waterUniforms.fogColor.value.copy(horizon);
   R.uniforms.skyTint.value.setRGB(1, dusk > 0.3 ? 0.88 : 1, dusk > 0.3 ? 0.78 : (d < 0.3 ? 1.15 : 1));
-  const fogFar = weather === 'rain' ? 55 : weather === 'cloudy' ? 80 : 95;
-  R.uniforms.fogFar.value = fogFar; R.uniforms.fogNear.value = fogFar * 0.4;
-  if (R.scene.fog) { R.scene.fog.color.copy(horizon); R.scene.fog.near = fogFar * 0.4; R.scene.fog.far = fogFar; }
+  const fogFar = weather === 'rain' ? 75 : weather === 'cloudy' ? 115 : 145;
+  R.uniforms.fogFar.value = fogFar; R.uniforms.fogNear.value = fogFar * 0.45;
+  if (R.scene.fog) { R.scene.fog.color.copy(horizon); R.scene.fog.near = fogFar * 0.45; R.scene.fog.far = fogFar; }
   R.sky.position.copy(camPos);
   const sunPos = new THREE.Vector3(Math.cos(ang) * 300, Math.sin(ang) * 300, 100).add(camPos);
   R.sun.position.copy(sunPos); R.sun.lookAt(camPos); R.sun.visible = Math.sin(ang) > -0.1 && weather !== 'rain';

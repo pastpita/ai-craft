@@ -61,13 +61,13 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 $('game').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#9fc4d8', 40, 95);
+scene.fog = new THREE.Fog('#9fc4d8', 60, 145);
 const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 900);
 camera.rotation.order = 'YXZ';
 window.addEventListener('resize', () => { renderer.setSize(window.innerWidth, window.innerHeight); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); });
 
 let hv = null;
-const P = { x: 100.5, y: W.STAND, z: 50.5, vx: 0, vy: 0, vz: 0, yaw: Math.PI, pitch: 0, onGround: false, phase: 0, crouch: false };
+const P = { x: W.VILLAGES[0].cx + 0.5, y: W.STAND, z: W.VILLAGES[0].cz + 6.5, vx: 0, vy: 0, vz: 0, yaw: Math.PI, pitch: 0, onGround: false, phase: 0, crouch: false };
 const cam = { x: P.x + 10, y: 28, z: P.z + 24, yaw: 0.35, pitch: -0.55 };
 G.P = P; G.cam = cam; G.camera = camera;
 G.viewPos = () => (G.mode === 'play' ? { x: P.x, z: P.z } : { x: cam.x - Math.sin(cam.yaw) * 14, z: cam.z - Math.cos(cam.yaw) * 14 });
@@ -386,7 +386,7 @@ function physics(dt) {
     P.vy = 0;
   }
   P.y = ny;
-  if (P.y < -10) { P.x = hv ? hv.center[0] + 0.5 : 100.5; P.z = hv ? hv.center[1] + 4.5 : 50.5; P.y = W.STAND + 1; }
+  if (P.y < -10) { P.x = hv ? hv.center[0] + 0.5 : W.VILLAGES[0].cx + 0.5; P.z = hv ? hv.center[1] + 4.5 : W.VILLAGES[0].cz + 6.5; P.y = W.STAND + 1; }
   P.x = Math.max(0.5, Math.min(W.W - 0.5, P.x)); P.z = Math.max(0.5, Math.min(W.D - 0.5, P.z));
   const hs = Math.hypot(P.vx, P.vz);
   if (P.onGround && hs > 0.5) {
